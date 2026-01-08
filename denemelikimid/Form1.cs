@@ -482,7 +482,14 @@ namespace denemelikimid
         }
 
         // --- EĞER YOKSA BU YARDIMCI METODU DA SINIFIN EN ALTINA EKLE ---
-        
+
+            // 2. ALT KISIM: Hoş Geldiniz Mesajı
+            Panel panelWelcome = new Panel();
+            panelWelcome.Dock = DockStyle.Fill;
+            panelWelcome.BackColor = Color.White;
+            panelWelcome.Padding = new Padding(30);
+            panelContent.Controls.Add(panelWelcome);
+            panelWelcome.BringToFront();
 
         // --- YARDIMCI METOT: HIZLI BUTON OLUŞTURUCU ---
         // Bunu LoadDashboardView'in dışına, en alta ekle
@@ -536,7 +543,7 @@ namespace denemelikimid
         private Panel CreateStatCard(string title, string value, Color color)
         {
             Panel card = new Panel
-            {
+        {
                 Width = 250,
                 Height = 140,
                 BackColor = Color.White,
@@ -1106,7 +1113,7 @@ namespace denemelikimid
                                         cmd.Parameters.AddWithValue("@iban", iban);
                                         cmd.Parameters.AddWithValue("@gun", gunSayisi);
                                         cmd.ExecuteNonQuery();
-                                    }
+                }
                                 }
                             }
                         }
@@ -1201,6 +1208,7 @@ namespace denemelikimid
                 }
             };
             pnlTools.Controls.Add(btnExport);
+            pnlTools.SendToBack();
 
             // Alt Bilgi
             Label lblInfo = new Label();
