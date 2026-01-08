@@ -481,16 +481,6 @@ namespace denemelikimid
             mainLayout.Controls.Add(bottomLayout, 0, 2);
         }
 
-        // --- EĞER YOKSA BU YARDIMCI METODU DA SINIFIN EN ALTINA EKLE ---
-
-            // 2. ALT KISIM: Hoş Geldiniz Mesajı
-            Panel panelWelcome = new Panel();
-            panelWelcome.Dock = DockStyle.Fill;
-            panelWelcome.BackColor = Color.White;
-            panelWelcome.Padding = new Padding(30);
-            panelContent.Controls.Add(panelWelcome);
-            panelWelcome.BringToFront();
-
         // --- YARDIMCI METOT: HIZLI BUTON OLUŞTURUCU ---
         // Bunu LoadDashboardView'in dışına, en alta ekle
         private Button CreateQuickBtn(string text, Color color, Action onClickAction)
