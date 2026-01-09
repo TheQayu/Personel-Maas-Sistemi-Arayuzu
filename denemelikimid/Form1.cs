@@ -1343,6 +1343,7 @@ namespace denemelikimid
             // Araç çubuğunu üst panele ekle
             pnlTopContainer.Controls.Add(flowTools);
 
+            //deneme yorumu
             // Sıralama (Başlık en üstte, Araçlar onun altında)
             flowTools.BringToFront();
             lblHeader.SendToBack(); // Dock.Top mantığında, en son eklenen veya SendToBack yapılan en üstte durur. 
