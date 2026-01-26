@@ -1,19 +1,39 @@
-﻿using MySql.Data.MySqlClient;
 using System;
+using MySql.Data.MySqlClient;
 using System.Data;
 
-namespace IskurTakipSistemi.DataBase
+namespace denemelikimid.DataBase
 {
-    public class DbRepository
+    public class NOTDbRepository
     {
-        // Parametreli select sorguları için DataTable döndüren method
+        public DataTable GetAll(string tableName)
+        {
+            try
+            {
+                var datatable = new DataTable();
+
+                using (var con = DbConnection.GetConnection())
+                {
+                    using (var adapter = new MySqlDataAdapter(
+                        $"SELECT * FROM {tableName}", con))
+                    {
+                        adapter.Fill(datatable);
+                    }
+                }
+                return datatable;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Başarısız veri çekme işlemi, hata: " + tableName, ex);
+            }
+        }
+
         public DataTable GetByQuery(string sql, params MySqlParameter[] parameters)
         {
             try
             {
-                var dt = new DataTable();
+                var datatable = new DataTable();
 
-               
                 using (var con = DbConnection.GetConnection())
                 {
                     using (var cmd = new MySqlCommand(sql, con))
@@ -23,21 +43,19 @@ namespace IskurTakipSistemi.DataBase
 
                         using (var adapter = new MySqlDataAdapter(cmd))
                         {
-                            adapter.Fill(dt);
+                            adapter.Fill(datatable);
                         }
                     }
                 }
 
-                return dt;
+                return datatable;
             }
             catch (Exception ex)
             {
-                
-                throw;
+                throw new Exception("Başarısız sorgu işlemi, hata: " + sql, ex);
             }
         }
 
-        // Parametreli sorgular için (Insert, Update, Delete)
         public void Execute(string sql, params MySqlParameter[] parameters)
         {
             try
@@ -49,15 +67,15 @@ namespace IskurTakipSistemi.DataBase
                         if (parameters != null)
                             cmd.Parameters.AddRange(parameters);
 
-                        con.Open();
                         cmd.ExecuteNonQuery();
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw;
+                throw new Exception("Başarısız veri tabanı komutu, hata: " + sql, ex);
             }
         }
     }
 }
+
