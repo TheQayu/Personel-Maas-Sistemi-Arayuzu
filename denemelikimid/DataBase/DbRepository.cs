@@ -2,7 +2,7 @@
 using System;
 using System.Data;
 
-namespace IskurTakipSistemi.DataBase
+namespace denemelikimid.DataBase
 {
     public class DbRepository
     {

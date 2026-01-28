@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Text;
 using MySql.Data.MySqlClient;
 using System.Data;
-using IskurTakipSistemi.DataBase.Models;
+using denemelikimid.DataBase.Models;
 
-namespace IskurTakipSistemi.DataBase.Repos
+namespace denemelikimid.DataBase.Repos
 {
     internal class KatilimciRepo
     {

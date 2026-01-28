@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace IskurTakipSistemi.DataBase.Models
+namespace denemelikimid.DataBase.Models
 {
     internal class KatilimciModel
     {

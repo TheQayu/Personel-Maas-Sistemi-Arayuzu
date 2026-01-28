@@ -4,9 +4,9 @@ using System.Data;
 using System.Text;
 using MySql.Data.MySqlClient;
 using System.Data;
-using IskurTakipSistemi.DataBase.Models;
+using denemelikimid.DataBase.Models;
 
-namespace IskurTakipSistemi.DataBase.Repos
+namespace denemelikimid.DataBase.Repos
 {
     internal class BordroRepo
     {
@@ -19,8 +19,21 @@ namespace IskurTakipSistemi.DataBase.Repos
         }
 
         public void Ekle(BordroModel model) {
-            string query = @"INSERT INTO bordro ( @b_tc, @b_ad_soyad, @b_gorev_yeri, @b_aylik_calisilan_gun, @b_cep_harcligi_tutari, @b_sosyal_guvenlik_primi, @b_tahakkuk_toplami, @b_gelir_vergisi_matrahi,  @b_hesaplanan_gelir_vergisi, @b_gv_istisna_tutari, @b_gelir_vergisi_kesintisi, @b_hesaplanan_damga_vergisi, @b_dv_istisna_tutari, @b_damga_vergisi_kesintisi, @b_gssp_kvsk, @b_icra_kesintisi, @b_toplam_kesinti, @b_odenmesi_gereken_net_tutar)
-                            VALUES (@tc, @adsoyad, @gorevyeri, @aylik_calisilan_gun, @cep_harcligi, @sosyal_guvenlik_primi, @tahakkuk_tplm, @gelir_vergisi_matrahi, @hesaplanan_gelir_vergisi, @gc_istisna_tutari, @gelir_vergisi_kesintisi, @hesaplanan_damga_vergisi, @dv_istisna_tutari, @damga_verigisi_kesintisi, @gssp_kvsk, @icra_kesintisi, @toplam_kesinti, @odenmesi_gereken_net_tutar)";
+            string query = @"
+         INSERT INTO bordro (
+        b_tc, b_ad_soyad, b_gorev_yeri, b_aylik_calisilan_gun, 
+        b_cep_harcligi_tutari, b_sosyal_guvenlik_primi, b_tahakkuk_toplami, 
+        b_gelir_vergisi_matrahi, b_hesaplanan_gelir_vergisi, b_gv_istisna_tutari, 
+        b_gelir_vergisi_kesintisi, b_hesaplanan_damga_vergisi, b_dv_istisna_tutari, 
+        b_damga_vergisi_kesintisi, b_gssp_kvsk, b_icra_kesintisi, 
+        b_toplam_kesinti, b_odenmesi_gereken_net_tutar )
+         VALUES (
+        @tc, @adsoyad, @gorevyeri, @aylik_calisilan_gun, 
+        @cep_harcligi, @sosyal_guvenlik_primi, @tahakkuk_tplm, 
+        @gelir_vergisi_matrahi, @hesaplanan_gelir_vergisi, @gc_istisna_tutari, 
+        @gelir_vergisi_kesintisi, @hesaplanan_damga_vergisi, @dv_istisna_tutari, 
+        @damga_verigisi_kesintisi, @gssp_kvsk, @icra_kesintisi, 
+        @toplam_kesinti, @odenmesi_gereken_net_tutar )";
             _db.Execute(query, 
             
                 new MySqlParameter("@tc", model.Bdr_tc),
