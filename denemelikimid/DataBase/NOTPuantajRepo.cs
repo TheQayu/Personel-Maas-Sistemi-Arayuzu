@@ -4,9 +4,9 @@ using MySql.Data.MySqlClient;
 
 namespace denemelikimid.DataBase
 {
-    public class PuantajRepo
+    public class NOTPuantajRepo
     {
-        private readonly DbRepository _db = new DbRepository();
+        private readonly NOTDbRepository _db = new NOTDbRepository();
 
         public DataTable Listele()
         {
