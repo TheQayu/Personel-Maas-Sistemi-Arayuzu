@@ -4,8 +4,8 @@ using System.Data;
 using System.Text;
 using MySql.Data.MySqlClient;
 using System.Data;
-using IskurTakipSistemi.DataBase.Models;
-namespace IskurTakipSistemi.DataBase.Repos
+using denemelikimid.DataBase.Models;
+namespace denemelikimid.DataBase.Repos
 {
     internal class BankaRepo
     {

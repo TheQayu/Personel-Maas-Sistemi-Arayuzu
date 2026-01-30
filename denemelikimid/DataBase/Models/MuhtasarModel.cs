@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace IskurTakipSistemi.DataBase.Models
+namespace denemelikimid.DataBase.Models
 {
     internal class MuhtasarModel
     {

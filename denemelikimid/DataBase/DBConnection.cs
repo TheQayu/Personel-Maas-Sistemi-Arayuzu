@@ -1,6 +1,6 @@
 ﻿using MySql.Data.MySqlClient;
 
-namespace IskurTakipSistemi.DataBase
+namespace denemelikimid.DataBase
 {
     public static class DbConnection
     {
