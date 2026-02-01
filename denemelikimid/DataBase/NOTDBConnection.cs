@@ -4,7 +4,7 @@ using System.Windows.Forms;
 
 namespace denemelikimid.DataBase
 {
-    public static class DbConnection
+    public static class NotDbConnection
     {
         private static readonly string _connectionString =
             "Server=localhost;Database=sakila;Uid=yeniAdmin;Pwd=1234;";

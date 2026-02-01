@@ -266,38 +266,64 @@ namespace denemelikimid
 
                 using (var workbook = new XLWorkbook())
                 {
-                    // Kampüslere göre ayrı sayfalar oluştur
-                    var kampusler = dt.AsEnumerable()
-                        .Select(row => row.Field<string>("b_gorev_yeri") ?? "Diğer")
-                        .Where(k => !string.IsNullOrEmpty(k))
-                        .Distinct()
-                        .ToList();
-
-                    if (kampusler.Count == 0)
+                    // Bordro tablosu için kampüslere göre ayrı sayfalar, muhtasar için tek sayfa
+                    if (tableName == "bordro" && dt.Columns.Contains("b_gorev_yeri"))
                     {
-                        kampusler.AddRange(new string[] { "Kampüs1", "Kampüs2", "Kampüs3" });
+                        // Kampüslere göre ayrı sayfalar oluştur
+                        var kampusler = dt.AsEnumerable()
+                            .Select(row => row.Field<string>("b_gorev_yeri") ?? "Diğer")
+                            .Where(k => !string.IsNullOrEmpty(k))
+                            .Distinct()
+                            .ToList();
+
+                        if (kampusler.Count == 0)
+                        {
+                            kampusler.AddRange(new string[] { "Kampüs1", "Kampüs2", "Kampüs3" });
+                        }
+
+                        foreach (string kampus in kampusler)
+                        {
+                            var ws = workbook.Worksheets.Add(kampus);
+                            var kampusRows = dt.AsEnumerable()
+                                .Where(row => (row.Field<string>("b_gorev_yeri") ?? "Diğer") == kampus)
+                                .ToList();
+                            
+                            if (kampusRows.Count > 0)
+                            {
+                                var kampusDt = kampusRows.CopyToDataTable();
+                                ws.Cell(1, 1).InsertTable(kampusDt);
+                                ws.Columns().AdjustToContents();
+                            }
+                        }
+
+                        SaveFileDialog sfd = new SaveFileDialog
+                        {
+                            Filter = "Excel Dosyası|*.xlsx",
+                            FileName = $"{fileName}_{DateTime.Now:yyyy-MM}.xlsx"
+                        };
+                        if (sfd.ShowDialog() == DialogResult.OK)
+                        {
+                            workbook.SaveAs(sfd.FileName);
+                            MessageBox.Show("✅ Dosya kaydedildi. Her kampüs için ayrı sayfa oluşturuldu.");
+                        }
                     }
-
-                    foreach (string kampus in kampusler)
+                    else
                     {
-                        var ws = workbook.Worksheets.Add(kampus);
-                        var kampusDt = dt.AsEnumerable()
-                            .Where(row => (row.Field<string>("b_gorev_yeri") ?? "Diğer") == kampus)
-                            .CopyToDataTable();
-                        
-                        ws.Cell(1, 1).InsertTable(kampusDt);
+                        // Muhtasar veya diğer tablolar için tek sayfa
+                        var ws = workbook.Worksheets.Add(tableName == "muhtasar_raporu" ? "Muhtasar Raporu" : "Rapor");
+                        ws.Cell(1, 1).InsertTable(dt);
                         ws.Columns().AdjustToContents();
-                    }
 
-                    SaveFileDialog sfd = new SaveFileDialog
-                    {
-                        Filter = "Excel Dosyası|*.xlsx",
-                        FileName = $"{fileName}_{DateTime.Now:yyyy-MM}.xlsx"
-                    };
-                    if (sfd.ShowDialog() == DialogResult.OK)
-                    {
-                        workbook.SaveAs(sfd.FileName);
-                        MessageBox.Show("✅ Dosya kaydedildi. Her kampüs için ayrı sayfa oluşturuldu.");
+                        SaveFileDialog sfd = new SaveFileDialog
+                        {
+                            Filter = "Excel Dosyası|*.xlsx",
+                            FileName = $"{fileName}_{DateTime.Now:yyyy-MM}.xlsx"
+                        };
+                        if (sfd.ShowDialog() == DialogResult.OK)
+                        {
+                            workbook.SaveAs(sfd.FileName);
+                            MessageBox.Show("✅ Dosya başarıyla kaydedildi.");
+                        }
                     }
                 }
             }

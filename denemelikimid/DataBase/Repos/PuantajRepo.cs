@@ -1,9 +1,10 @@
-﻿using denemelikimid.DataBase.Models;
+﻿using denemelikimid.DataBase;
+using denemelikimid.DataBase.Models;
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.Entity;
 using System.Text;
+using MySql.Data.MySqlClient;
 
 namespace denemelikimid.DataBase.Repos
 {
@@ -17,7 +18,7 @@ namespace denemelikimid.DataBase.Repos
         }
         public class PuantajRepository
         {
-            private readonly DbContext _db;
+            private readonly DbRepository _db = new DbRepository();
 
  
             public void Ekle(PuantajModel model)

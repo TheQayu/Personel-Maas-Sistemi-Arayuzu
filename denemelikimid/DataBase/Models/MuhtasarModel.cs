@@ -29,10 +29,10 @@ namespace denemelikimid.DataBase.Models
         public float Mht_prim_ikramiye_vb_istihkak { get; set; }
         public float Mht_doneme_ait_gelir_vergisi_matrahi { get; set; }
         public float Mht_hesaplanan_gelir_vergisi { get; set; }
-        public float Mht_asgari_ucret_gelir_vergisi_tutari { get; set; }
+        public float Mht_asgari_ucret_istisna_gelir_vergisi_tutari { get; set; }
         public float Mht_gelir_vergisi_kesintisi { get; set; }
         public float Mht_asgari_ucret_istisna_damga_vergisi_tutari { get; set; }
-        public float Mh_damga_vergisi_kesintisi { get; set; }
+        public float Mht_damga_vergisi_kesintisi { get; set; }
         public bool Mht_istirahat_suresinde_calismamistir { get; set; }
         public bool Mht_gelir_vergisinden_muaflik { get; set; }
         public DateTime Mht_ise_giris_tarihi { get; set; }

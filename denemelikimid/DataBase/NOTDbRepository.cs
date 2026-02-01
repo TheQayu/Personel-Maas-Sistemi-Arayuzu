@@ -12,7 +12,7 @@ namespace denemelikimid.DataBase
             {
                 var datatable = new DataTable();
 
-                using (var con = DbConnection.GetConnection())
+                using (var con = NotDbConnection.GetConnection())
                 {
                     using (var adapter = new MySqlDataAdapter(
                         $"SELECT * FROM {tableName}", con))
@@ -34,7 +34,7 @@ namespace denemelikimid.DataBase
             {
                 var datatable = new DataTable();
 
-                using (var con = DbConnection.GetConnection())
+                using (var con = NotDbConnection.GetConnection())
                 {
                     using (var cmd = new MySqlCommand(sql, con))
                     {
@@ -60,7 +60,7 @@ namespace denemelikimid.DataBase
         {
             try
             {
-                using (var con = DbConnection.GetConnection())
+                using (var con = NotDbConnection.GetConnection())
                 {
                     using (var cmd = new MySqlCommand(sql, con))
                     {

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Data;
 using System.Text;
 using MySql.Data.MySqlClient;
-using System.Data;
 using denemelikimid.DataBase.Models;
 
 namespace denemelikimid.DataBase.Repos

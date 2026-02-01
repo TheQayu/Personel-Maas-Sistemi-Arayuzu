@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Text;
 using MySql.Data.MySqlClient;
 using System.Data;
+using denemelikimid.DataBase;
 using denemelikimid.DataBase.Models;
-using DocumentFormat.OpenXml.Office.CustomUI;
 
 
 namespace denemelikimid.DataBase.Repos
