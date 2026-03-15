@@ -211,6 +211,7 @@ namespace denemelikimid
             };
             btn.FlatAppearance.BorderSize = 0;
             btn.Click += (s, e) => onClickAction.Invoke();
+            ApplyRoundedCorners(btn, 15);
             return btn;
         }
 

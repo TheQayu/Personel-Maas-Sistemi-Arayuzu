@@ -55,7 +55,7 @@ namespace denemelikimid
             // Günlük Ücret Girişi
             Panel pnlUcret = new Panel { Width = 140, Height = 60, Margin = new Padding(0, 0, 10, 0) };
             Label lblUcret = new Label { Text = "Günlük Brüt (TL):", Location = new Point(0, 0), AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Color.Gray };
-            NumericUpDown numUcret = new NumericUpDown { Location = new Point(0, 25), Width = 130, Height = 35, Maximum = 10000, DecimalPlaces = 2, Value = 666.75M, Font = new Font("Segoe UI", 11) };
+            NumericUpDown numUcret = new NumericUpDown { Location = new Point(0, 25), Width = 130, Height = 35, Maximum = 10000, DecimalPlaces = 2, Value = 1375.00M, Font = new Font("Segoe UI", 11) };
             pnlUcret.Controls.Add(lblUcret); pnlUcret.Controls.Add(numUcret);
             flowTools.Controls.Add(pnlUcret);
 
@@ -67,6 +67,22 @@ namespace denemelikimid
             cmbKampusFiltre.SelectedIndex = 0;
             pnlFiltre.Controls.Add(lblFiltre); pnlFiltre.Controls.Add(cmbKampusFiltre);
             flowTools.Controls.Add(pnlFiltre);
+
+            // AY SEÇİCİ
+            Panel pnlDonem = new Panel { Width = 160, Height = 60, Margin = new Padding(0, 0, 10, 0) };
+            Label lblDonem = new Label { Text = "Dönem (Ay):", Location = new Point(0, 0), AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Color.Gray };
+            DateTimePicker dtpRaporDonem = new DateTimePicker
+            {
+                Location = new Point(0, 25),
+                Width = 150,
+                Height = 35,
+                Font = new Font("Segoe UI", 11),
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "MMMM yyyy",
+                ShowUpDown = true
+            };
+            pnlDonem.Controls.Add(lblDonem); pnlDonem.Controls.Add(dtpRaporDonem);
+            flowTools.Controls.Add(pnlDonem);
 
             // Butonlar
             Button btnHesapla = CreateActionButton("⚙️ 1. Hesapla", Color.Orange);
@@ -113,6 +129,7 @@ namespace denemelikimid
                         conn.Open();
 
                         string secilenKampus = cmbKampusFiltre.SelectedItem?.ToString() ?? "Tümü";
+                        string donem = dtpRaporDonem.Value.ToString("yyyy-MM");
 
                         string sql = @"SELECT b_tc AS 'TC', b_ad_soyad AS 'Ad Soyad', 
                              b_gorev_yeri AS 'Kampüs',
@@ -120,10 +137,12 @@ namespace denemelikimid
                              b_tahakkuk_toplami AS 'Brüt', 
                              b_odenmesi_gereken_net_tutar AS 'NET MAAŞ' 
                              FROM bordro 
-                             WHERE (@filtre = 'Tümü' OR b_gorev_yeri = @filtre)";
+                             WHERE (@filtre = 'Tümü' OR b_gorev_yeri = @filtre)
+                               AND b_yil_ay = @donem";
 
                         var cmd = new MySqlCommand(sql, conn);
                         cmd.Parameters.AddWithValue("@filtre", secilenKampus);
+                        cmd.Parameters.AddWithValue("@donem", donem);
 
                         using (var da = new MySqlDataAdapter(cmd))
                         {
@@ -141,6 +160,7 @@ namespace denemelikimid
 
             // Filtre değişince güncelle
             cmbKampusFiltre.SelectedIndexChanged += (s, e) => ListeyiGuncelle();
+            dtpRaporDonem.ValueChanged += (s, e) => ListeyiGuncelle();
 
             // --- HESAPLA BUTONU ---
             btnHesapla.Click += (s, e) => {
@@ -151,18 +171,41 @@ namespace denemelikimid
                     {
                         conn.Open();
 
-                        // Önce temizle
-                        new MySqlCommand("TRUNCATE TABLE bordro", conn).ExecuteNonQuery();
-                        new MySqlCommand("TRUNCATE TABLE muhtasar_raporu", conn).ExecuteNonQuery();
-                        new MySqlCommand("TRUNCATE TABLE banka_listesi", conn).ExecuteNonQuery();
+                        // Çoklu ay desteği için tüm ilgili tablolardaki UNIQUE kısıtlarını kaldır
+                        try
+                        {
+                            var dtIdx = new DataTable();
+                            using (var da = new MySqlDataAdapter(
+                                "SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS " +
+                                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('puantaj','bordro','muhtasar_raporu','banka_listesi') " +
+                                "AND NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY' GROUP BY TABLE_NAME, INDEX_NAME", conn))
+                                da.Fill(dtIdx);
+                            foreach (DataRow idxRow in dtIdx.Rows)
+                            {
+                                try { new MySqlCommand($"ALTER TABLE `{idxRow["TABLE_NAME"]}` DROP INDEX `{idxRow["INDEX_NAME"]}`", conn).ExecuteNonQuery(); } catch { }
+                            }
+                        } catch { }
+
+                        // b_yil_ay sütununu ekle (zaten varsa hata yutulur)
+                        try { new MySqlCommand("ALTER TABLE bordro ADD COLUMN b_yil_ay VARCHAR(7)", conn).ExecuteNonQuery(); } catch { }
+                        try { new MySqlCommand("ALTER TABLE muhtasar_raporu ADD COLUMN mh_yil_ay VARCHAR(7)", conn).ExecuteNonQuery(); } catch { }
+                        try { new MySqlCommand("ALTER TABLE banka_listesi ADD COLUMN bl_yil_ay VARCHAR(7)", conn).ExecuteNonQuery(); } catch { }
+
+                        // Seçili ayın verilerini temizle (diğer aylar korunur)
+                        string secilenDonem = dtpRaporDonem.Value.ToString("yyyy-MM");
+                        using (var delCmd = new MySqlCommand("DELETE FROM bordro WHERE b_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
+                        using (var delCmd = new MySqlCommand("DELETE FROM muhtasar_raporu WHERE mh_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
+                        using (var delCmd = new MySqlCommand("DELETE FROM banka_listesi WHERE bl_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
 
                         // Puantajdan verileri al (Personel tablosuyla birleştirip Kampüsü de alıyoruz)
                         string sqlPuantaj = @"SELECT p.*, COALESCE(pk.pk_gorev_yeri, 'Kampüs1') AS guncel_kampus 
                                       FROM puantaj p
                                       LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
-                                      WHERE p.p_calistigi_gun_sayisi > 0";
+                                      WHERE p.p_calistigi_gun_sayisi > 0
+                                        AND p.p_yil_ay = @donem";
 
                         var cmdGet = new MySqlCommand(sqlPuantaj, conn);
+                        cmdGet.Parameters.AddWithValue("@donem", secilenDonem);
                         var dr = cmdGet.ExecuteReader();
                         DataTable dtPuantaj = new DataTable();
                         dtPuantaj.Load(dr);
@@ -185,34 +228,35 @@ namespace denemelikimid
 
                             // Bordroya Ekle (KAMPÜS BİLGİSİYLE BERABER)
                             string sqlBordro = @"INSERT INTO bordro 
-                        (b_tc, b_ad_soyad, b_gorev_yeri, b_aylik_calisilan_gun, b_tahakkuk_toplami, b_sosyal_guvenlik_primi, b_gelir_vergisi_kesintisi, b_damga_vergisi_kesintisi, b_odenmesi_gereken_net_tutar) 
-                        VALUES (@tc, @ad, @kampus, @gun, @brut, @sgk, @gv, @dv, @net)";
+                        (b_tc, b_ad_soyad, b_gorev_yeri, b_aylik_calisilan_gun, b_tahakkuk_toplami, b_sosyal_guvenlik_primi, b_gelir_vergisi_kesintisi, b_damga_vergisi_kesintisi, b_odenmesi_gereken_net_tutar, b_yil_ay) 
+                        VALUES (@tc, @ad, @kampus, @gun, @brut, @sgk, @gv, @dv, @net, @donem)";
 
                             using (var cmd = new MySqlCommand(sqlBordro, conn))
                             {
                                 cmd.Parameters.AddWithValue("@tc", tc);
                                 cmd.Parameters.AddWithValue("@ad", ad);
-                                cmd.Parameters.AddWithValue("@kampus", kampus); // <-- Önemli: Kampüsü kaydediyoruz
+                                cmd.Parameters.AddWithValue("@kampus", kampus);
                                 cmd.Parameters.AddWithValue("@gun", gun);
                                 cmd.Parameters.AddWithValue("@brut", brutUcret);
                                 cmd.Parameters.AddWithValue("@sgk", sgkPrimi);
                                 cmd.Parameters.AddWithValue("@gv", gelirVergisi);
                                 cmd.Parameters.AddWithValue("@dv", damgaVergisi);
                                 cmd.Parameters.AddWithValue("@net", netUcret);
+                                cmd.Parameters.AddWithValue("@donem", secilenDonem);
                                 cmd.ExecuteNonQuery();
                             }
 
                             // Muhtasar ve Banka tablolarına ekleme kısımları aynen devam...
-                            string sqlMuhtasar = "INSERT INTO muhtasar_raporu (mh_tc, mh_ad_soyad, mh_prim_odeme_gunu, mh_hak_edilen_ucret, mh_doneme_ait_gelir_vergisi_matrahi, mh_gelir_vergisi_kesintisi, mh_damga_vergisi_kesintisi) VALUES (@tc, @ad, @gun, @brut, @matrah, @gv, @dv)";
+                            string sqlMuhtasar = "INSERT INTO muhtasar_raporu (mh_tc, mh_ad_soyad, mh_prim_odeme_gunu, mh_hak_edilen_ucret, mh_doneme_ait_gelir_vergisi_matrahi, mh_gelir_vergisi_kesintisi, mh_damga_vergisi_kesintisi, mh_yil_ay) VALUES (@tc, @ad, @gun, @brut, @matrah, @gv, @dv, @donem)";
                             using (var cmd = new MySqlCommand(sqlMuhtasar, conn))
                             {
-                                cmd.Parameters.AddWithValue("@tc", tc); cmd.Parameters.AddWithValue("@ad", ad); cmd.Parameters.AddWithValue("@gun", gun); cmd.Parameters.AddWithValue("@brut", brutUcret); cmd.Parameters.AddWithValue("@matrah", gelirVergisiMatrahi); cmd.Parameters.AddWithValue("@gv", gelirVergisi); cmd.Parameters.AddWithValue("@dv", damgaVergisi); cmd.ExecuteNonQuery();
+                                cmd.Parameters.AddWithValue("@tc", tc); cmd.Parameters.AddWithValue("@ad", ad); cmd.Parameters.AddWithValue("@gun", gun); cmd.Parameters.AddWithValue("@brut", brutUcret); cmd.Parameters.AddWithValue("@matrah", gelirVergisiMatrahi); cmd.Parameters.AddWithValue("@gv", gelirVergisi); cmd.Parameters.AddWithValue("@dv", damgaVergisi); cmd.Parameters.AddWithValue("@donem", secilenDonem); cmd.ExecuteNonQuery();
                             }
 
-                            string sqlBanka = "INSERT INTO banka_listesi (bl_tc, bl_ad_soyad, bl_iban_no, bl_tutar) VALUES (@tc, @ad, @iban, @net)";
+                            string sqlBanka = "INSERT INTO banka_listesi (bl_tc, bl_ad_soyad, bl_iban_no, bl_tutar, bl_yil_ay) VALUES (@tc, @ad, @iban, @net, @donem)";
                             using (var cmd = new MySqlCommand(sqlBanka, conn))
                             {
-                                cmd.Parameters.AddWithValue("@tc", tc); cmd.Parameters.AddWithValue("@ad", ad); cmd.Parameters.AddWithValue("@iban", iban); cmd.Parameters.AddWithValue("@net", netUcret); cmd.ExecuteNonQuery();
+                                cmd.Parameters.AddWithValue("@tc", tc); cmd.Parameters.AddWithValue("@ad", ad); cmd.Parameters.AddWithValue("@iban", iban); cmd.Parameters.AddWithValue("@net", netUcret); cmd.Parameters.AddWithValue("@donem", secilenDonem); cmd.ExecuteNonQuery();
                             }
                         }
                     }
@@ -231,7 +275,7 @@ namespace denemelikimid
 
         private Button CreateActionButton(string text, Color color)
         {
-            return new Button
+            var btn = new Button
             {
                 Text = text,
                 Size = new Size(200, 55),
@@ -242,6 +286,9 @@ namespace denemelikimid
                 Cursor = Cursors.Hand,
                 Margin = new Padding(0, 0, 15, 10)
             };
+            btn.FlatAppearance.BorderSize = 0;
+            ApplyRoundedCorners(btn, 12);
+            return btn;
         }
 
         private void ExportTableToExcel(string tableName, string fileName)
@@ -266,13 +313,13 @@ namespace denemelikimid
 
                 using (var workbook = new XLWorkbook())
                 {
-                    // Bordro tablosu için kampüslere göre ayrı sayfalar, muhtasar için tek sayfa
+                    // Bordro tablosu için kampüslere göre ayrı dosyalar (BUÜ formatı)
                     if (tableName == "bordro" && dt.Columns.Contains("b_gorev_yeri"))
                     {
-                        // Kampüslere göre ayrı sayfalar oluştur
+                        // Kampüslere göre ayrı dosyalar oluştur (BUÜ formatı)
                         var kampusler = dt.AsEnumerable()
                             .Select(row => row.Field<string>("b_gorev_yeri") ?? "Diğer")
-                            .Where(k => !string.IsNullOrEmpty(k))
+                            .Where(k => !string.IsNullOrEmpty(k) && (k == "Kampüs1" || k == "Kampüs2" || k == "Kampüs3"))
                             .Distinct()
                             .ToList();
 
@@ -281,9 +328,9 @@ namespace denemelikimid
                             kampusler.AddRange(new string[] { "Kampüs1", "Kampüs2", "Kampüs3" });
                         }
 
+                        // Her kampüs için ayrı dosya oluştur
                         foreach (string kampus in kampusler)
                         {
-                            var ws = workbook.Worksheets.Add(kampus);
                             var kampusRows = dt.AsEnumerable()
                                 .Where(row => (row.Field<string>("b_gorev_yeri") ?? "Diğer") == kampus)
                                 .ToList();
@@ -291,20 +338,47 @@ namespace denemelikimid
                             if (kampusRows.Count > 0)
                             {
                                 var kampusDt = kampusRows.CopyToDataTable();
-                                ws.Cell(1, 1).InsertTable(kampusDt);
-                                ws.Columns().AdjustToContents();
-                            }
-                        }
+                                
+                                // Kampüs numarasını belirle (13376, 13377, 13378)
+                                string kampusNo = "13376";
+                                if (kampus == "Kampüs2") kampusNo = "13377";
+                                else if (kampus == "Kampüs3") kampusNo = "13378";
 
-                        SaveFileDialog sfd = new SaveFileDialog
-                        {
-                            Filter = "Excel Dosyası|*.xlsx",
-                            FileName = $"{fileName}_{DateTime.Now:yyyy-MM}.xlsx"
-                        };
-                        if (sfd.ShowDialog() == DialogResult.OK)
-                        {
-                            workbook.SaveAs(sfd.FileName);
-                            MessageBox.Show("✅ Dosya kaydedildi. Her kampüs için ayrı sayfa oluşturuldu.");
+                                // Dosya adını oluştur
+                                string buuFileName = $"{kampusNo} BUÜ BORDRO VE PUANTAJ {DateTime.Now:MMMM yyyy}";
+                                
+                                SaveFileDialog sfd = new SaveFileDialog
+                                {
+                                    Filter = "Excel Dosyası|*.xlsx",
+                                    FileName = buuFileName + ".xlsx"
+                                };
+                                
+                                if (sfd.ShowDialog() == DialogResult.OK)
+                                {
+                                    using (var kampusWorkbook = new XLWorkbook())
+                                    {
+                                        var ws = kampusWorkbook.Worksheets.Add("Bordro");
+                                        
+                                        // BUÜ başlığı
+                                        ws.Cell(1, 1).Value = "BURSA ULUDAĞ ÜNİVERSİTESİ";
+                                        ws.Range(1, 1, 1, kampusDt.Columns.Count).Merge().Style.Font.Bold = true;
+                                        ws.Cell(1, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                                        
+                                        // Dönem bilgisi
+                                        ws.Cell(2, 1).Value = $"{DateTime.Now:MMMM yyyy} BORDRO VE PUANTAJ - {kampus.ToUpper()}";
+                                        ws.Range(2, 1, 2, kampusDt.Columns.Count).Merge().Style.Font.Bold = true;
+                                        ws.Cell(2, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                                        
+                                        // Tabloyu ekle (3. satırdan itibaren)
+                                        ws.Cell(3, 1).InsertTable(kampusDt);
+                                        ws.Columns().AdjustToContents();
+                                        
+                                        kampusWorkbook.SaveAs(sfd.FileName);
+                                    }
+                                    
+                                    MessageBox.Show($"✅ {kampus} için dosya kaydedildi: {System.IO.Path.GetFileName(sfd.FileName)}");
+                                }
+                            }
                         }
                     }
                     else

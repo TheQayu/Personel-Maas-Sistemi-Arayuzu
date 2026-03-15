@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
@@ -37,6 +38,8 @@ namespace denemelikimid
         private Panel panelLogo;
         private DataGridView dgvMain;
         private string currentView = "Dashboard";
+        private Label lblLogo;
+        private Label lblUser;
 
         public Form1()
         {
@@ -74,7 +77,7 @@ namespace denemelikimid
         {
             panelSidebar = new Panel();
             panelSidebar.Dock = DockStyle.Left;
-            panelSidebar.Width = 280;
+            panelSidebar.Width = 205;
             panelSidebar.BackColor = colorSidebar;
             panelSidebar.Padding = new Padding(0);
             this.Controls.Add(panelSidebar);
@@ -87,7 +90,7 @@ namespace denemelikimid
             panelLogo.Padding = new Padding(20, 20, 20, 20);
             panelSidebar.Controls.Add(panelLogo);
 
-            Label lblLogo = new Label();
+            lblLogo = new Label();
             lblLogo.Text = "🏛️\nÜNİVERSİTE\nPERSONEL SİSTEMİ";
             lblLogo.ForeColor = Color.White;
             lblLogo.Font = new Font("Segoe UI", 14, FontStyle.Bold);
@@ -119,7 +122,7 @@ namespace denemelikimid
             panelUser.Padding = new Padding(15);
             panelSidebar.Controls.Add(panelUser);
 
-            Label lblUser = new Label();
+            lblUser = new Label();
             lblUser.Text = "👤 Admin Kullanıcı";
             lblUser.ForeColor = Color.White;
             lblUser.Font = new Font("Segoe UI", 10, FontStyle.Regular);
@@ -199,6 +202,7 @@ namespace denemelikimid
                 }
             };
 
+            ApplyRoundedCorners(btn, 8);
             parent.Controls.Add(btn);
             btn.BringToFront();
         }
@@ -264,6 +268,7 @@ namespace denemelikimid
                 btnLogout.BackColor = colorDanger;
             };
 
+            ApplyRoundedCorners(btnLogout, 12);
             panelActions.Controls.Add(btnLogout);
         }
 
@@ -272,7 +277,7 @@ namespace denemelikimid
             panelContent = new Panel();
             panelContent.Dock = DockStyle.Fill;
             panelContent.BackColor = colorContent;
-            panelContent.Padding = new Padding(30);
+            panelContent.Padding = new Padding(10);
             this.Controls.Add(panelContent);
         }
 
@@ -334,10 +339,85 @@ namespace denemelikimid
             btn.MouseEnter += (s, e) => { btn.BackColor = hoverColor; };
             btn.MouseLeave += (s, e) => { btn.BackColor = backColor; };
 
+            ApplyRoundedCorners(btn, 12);
             parent.Controls.Add(btn);
             return btn;
         }
 
+        private static GraphicsPath CreateRoundedRectPath(Rectangle bounds, int radius)
+        {
+            var path = new GraphicsPath();
+            int d = radius * 2;
+            path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
+            path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
+            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+            path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static Color GetEffectiveParentBackColor(Control ctrl)
+        {
+            Control parent = ctrl.Parent;
+            while (parent != null)
+            {
+                if (parent.BackColor.A == 255 && parent.BackColor != Color.Transparent)
+                    return parent.BackColor;
+                parent = parent.Parent;
+            }
+            return SystemColors.Control;
+        }
+
+        private static void ApplyRoundedCorners(Control ctrl, int radius)
+        {
+            if (!(ctrl is Button btn)) return;
+
+            btn.FlatStyle = FlatStyle.Flat;
+            btn.FlatAppearance.BorderSize = 0;
+
+            btn.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+                Color parentBg = GetEffectiveParentBackColor(btn);
+                Color fillColor = btn.BackColor;
+
+                g.Clear(parentBg);
+
+                if (fillColor.A > 0 && fillColor != Color.Transparent)
+                {
+                    using (var path = CreateRoundedRectPath(new Rectangle(0, 0, btn.Width - 1, btn.Height - 1), radius))
+                    using (var brush = new SolidBrush(fillColor))
+                    {
+                        g.FillPath(brush, path);
+                    }
+                }
+
+                TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
+                if (btn.TextAlign == ContentAlignment.MiddleLeft)
+                    flags |= TextFormatFlags.Left;
+                else
+                    flags |= TextFormatFlags.HorizontalCenter;
+
+                var rect = new Rectangle(btn.Padding.Left, 0,
+                                         btn.Width - btn.Padding.Left - btn.Padding.Right, btn.Height);
+                TextRenderer.DrawText(g, btn.Text, btn.Font, rect, btn.ForeColor, flags);
+            };
+        }
+
+        private void InitializeComponent()
+        {
+            this.SuspendLayout();
+            // 
+            // Form1
+            // 
+            this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Name = "Form1";
+            this.ResumeLayout(false);
+
+        }
     }
 }
 

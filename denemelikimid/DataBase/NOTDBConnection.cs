@@ -1,13 +1,15 @@
 using System;
 using MySql.Data.MySqlClient;
 using System.Windows.Forms;
+using System.Configuration;
 
 namespace denemelikimid.DataBase
 {
     public static class NotDbConnection
     {
         private static readonly string _connectionString =
-            "Server=localhost;Database=sakila;Uid=yeniAdmin;Pwd=1234;";
+            ConfigurationManager.ConnectionStrings["IskurDb"]?.ConnectionString
+            ?? "Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;";
 
         public static MySqlConnection GetConnection()
         {
