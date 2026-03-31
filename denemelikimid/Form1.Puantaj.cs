@@ -8,6 +8,7 @@ using ClosedXML.Excel;
 using MySql.Data.MySqlClient;
 using denemelikimid.DataBase;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.IO;
 
@@ -15,6 +16,31 @@ namespace denemelikimid
 {
     public partial class Form1
     {
+        private sealed class PuantajRowData
+        {
+            public string Tc { get; }
+            public string AdSoyad { get; }
+            public string Detay { get; }
+
+            public PuantajRowData(string tc, string adSoyad, string detay)
+            {
+                Tc = tc;
+                AdSoyad = adSoyad;
+                Detay = detay;
+            }
+        }
+
+        private const int EM_SETCUEBANNER = 0x1501;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        private static void SetCueBanner(TextBox textBox, string cue)
+        {
+            if (textBox == null) return;
+            SendMessage(textBox.Handle, EM_SETCUEBANNER, (IntPtr)1, cue);
+        }
+
         private void LoadPuantajView()
         {
             // 1. SAYFA TEMİZLİĞİ
@@ -74,6 +100,30 @@ namespace denemelikimid
             };
             dtpDonem.Value = secilenTarih;
             flowTools.Controls.Add(dtpDonem);
+
+            // Personel Arama
+            TextBox txtSearch = new TextBox
+            {
+                Width = 220,
+                Font = new Font("Segoe UI", 12),
+                Margin = new Padding(0, 5, 20, 10)
+            };
+            txtSearch.HandleCreated += (s, e) => SetCueBanner(txtSearch, "Personel Ara");
+            flowTools.Controls.Add(txtSearch);
+
+            // Dışa Aktarım Seçeneği
+            ComboBox cmbExportScope = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 12),
+                Width = 220,
+                Margin = new Padding(0, 5, 20, 10),
+                Height = 40
+            };
+            cmbExportScope.Items.Add("Tüm Kampüsler");
+            cmbExportScope.Items.Add("Sadece Seçili Kampüs");
+            cmbExportScope.SelectedIndex = 1;
+            flowTools.Controls.Add(cmbExportScope);
 
             // Butonlar
             Button btnExcelExport = new Button
@@ -139,37 +189,22 @@ namespace denemelikimid
                 tabControlKampusler.TabPages.Clear();
                 kampusGrids.Clear();
 
-                try
-                {
-                    List<string> kampusListesi = new List<string>();
-                    using (var conn = NotDbConnection.GetConnection())
+                Task.Run(() => FetchKampusListesi())
+                    .ContinueWith(t =>
                     {
-                        // Farklı kampüsleri çek (pk_gorev_yeri kolonu kampüs bilgisini tutar)
-                        string sqlKampusler = @"
-                            SELECT DISTINCT COALESCE(pk.pk_gorev_yeri, 'Diğer') AS kampus
-                            FROM puantaj p
-                            LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
-                            ORDER BY kampus";
-
-                        var cmdKampusler = new MySqlCommand(sqlKampusler, conn);
-                        using (var drKampusler = cmdKampusler.ExecuteReader())
+                        if (t.IsFaulted)
                         {
-                            while (drKampusler.Read())
-                            {
-                                string kampus = drKampusler["kampus"].ToString();
-                                if (string.IsNullOrEmpty(kampus)) kampus = "Diğer";
-                                kampusListesi.Add(kampus);
-                            }
+                            var ex = t.Exception?.GetBaseException() ?? t.Exception;
+                            MessageBox.Show("Kampüsler yüklenirken hata: " + ex?.Message);
+                            return;
                         }
 
-                        // Eğer hiç kampüs yoksa varsayılan kampüsler oluştur
-                        if (kampusListesi.Count == 0)
+                        if (tabControlKampusler.IsDisposed)
                         {
-                            kampusListesi.AddRange(new string[] { "Kampüs1", "Kampüs2", "Kampüs3" });
+                            return;
                         }
 
-                        // Her kampüs için tab ve grid oluştur
-                        foreach (string kampus in kampusListesi)
+                        foreach (string kampus in t.Result)
                         {
                             TabPage tabPage = new TabPage
                             {
@@ -178,119 +213,174 @@ namespace denemelikimid
                                 BackColor = Color.White
                             };
 
-                            DataGridView dgvPuantaj = new DataGridView
+                            var loadingLabel = new Label
                             {
+                                Text = "Yükleniyor...",
                                 Dock = DockStyle.Fill,
-                                BackgroundColor = Color.White,
-                                AllowUserToAddRows = false,
-                                RowHeadersVisible = false,
-                                BorderStyle = BorderStyle.FixedSingle
+                                TextAlign = ContentAlignment.MiddleCenter,
+                                ForeColor = Color.Gray
                             };
+                            tabPage.Controls.Add(loadingLabel);
+                            tabControlKampusler.TabPages.Add(tabPage);
 
-                            // Daha iyi performans için DoubleBuffered
-                            typeof(DataGridView).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(dgvPuantaj, true, null);
-
-                            // Only allow changes via program (click handler) to prevent manual typing
-                            dgvPuantaj.EditMode = DataGridViewEditMode.EditProgrammatically;
-                            dgvPuantaj.SelectionMode = DataGridViewSelectionMode.CellSelect;
-                            dgvPuantaj.ColumnHeadersHeight = 66;
-                            dgvPuantaj.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-                            dgvPuantaj.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-                            dgvPuantaj.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Bold);
-                            dgvPuantaj.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
-                            dgvPuantaj.EnableHeadersVisualStyles = false;
-                            dgvPuantaj.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(238, 244, 255);
-                            dgvPuantaj.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(50, 50, 50);
-                            dgvPuantaj.RowTemplate.Height = 32;
-                            dgvPuantaj.AllowUserToResizeRows = false;
-                            dgvPuantaj.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
-
-                            // Özel çizim ve satır vurgulama
-                            dgvPuantaj.CellEnter += (s, e) => {
-                                dgvPuantaj.InvalidateRow(e.RowIndex);
-                            };
-                            dgvPuantaj.CellLeave += (s, e) => {
-                                dgvPuantaj.InvalidateRow(e.RowIndex);
-                            };
-
-                            dgvPuantaj.CellPainting += (s, e) => {
-                                if (e.RowIndex >= 0 && e.ColumnIndex >= 2)
+                            tabControlKampusler.BeginInvoke(new Action(() =>
+                            {
+                                if (tabPage.IsDisposed)
                                 {
-                                    bool isSelectedRow = (dgvPuantaj.CurrentCell != null && dgvPuantaj.CurrentCell.RowIndex == e.RowIndex);
-                                    Color backColor = e.CellStyle.BackColor;
+                                    return;
+                                }
 
-                                    // Sadece boyanmamış (beyaz/boş veya haftasonu gri) hücrelerde seçili satır efekti yap
-                                    bool isDefaultColor = (backColor.ToArgb() == Color.White.ToArgb() || backColor.ToArgb() == Color.Empty.ToArgb() || backColor.ToArgb() == Color.FromArgb(245, 245, 245).ToArgb());
+                                tabPage.Controls.Clear();
 
-                                    if (isSelectedRow && isDefaultColor)
+                                DataGridView dgvPuantaj = new DataGridView
+                                {
+                                    Dock = DockStyle.Fill,
+                                    BackgroundColor = Color.White,
+                                    AllowUserToAddRows = false,
+                                    RowHeadersVisible = false,
+                                    BorderStyle = BorderStyle.FixedSingle
+                                };
+
+                                // Daha iyi performans için DoubleBuffered
+                                typeof(DataGridView).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(dgvPuantaj, true, null);
+
+                                // Only allow changes via program (click handler) to prevent manual typing
+                                dgvPuantaj.EditMode = DataGridViewEditMode.EditProgrammatically;
+                                dgvPuantaj.SelectionMode = DataGridViewSelectionMode.CellSelect;
+                                dgvPuantaj.ColumnHeadersHeight = 66;
+                                dgvPuantaj.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                                dgvPuantaj.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                                dgvPuantaj.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+                                dgvPuantaj.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
+                                dgvPuantaj.EnableHeadersVisualStyles = false;
+                                dgvPuantaj.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(238, 244, 255);
+                                dgvPuantaj.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(50, 50, 50);
+                                dgvPuantaj.RowTemplate.Height = 32;
+                                dgvPuantaj.AllowUserToResizeRows = false;
+                                dgvPuantaj.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+
+                                // Özel çizim ve satır vurgulama
+                                dgvPuantaj.CellEnter += (s, e) => {
+                                    dgvPuantaj.InvalidateRow(e.RowIndex);
+                                };
+                                dgvPuantaj.CellLeave += (s, e) => {
+                                    dgvPuantaj.InvalidateRow(e.RowIndex);
+                                };
+
+                                dgvPuantaj.CellPainting += (s, e) => {
+                                    if (e.RowIndex >= 0 && e.ColumnIndex >= 2)
                                     {
-                                        backColor = Color.FromArgb(220, 235, 255); // hafif mavi 
-                                    }
+                                        bool isSelectedRow = (dgvPuantaj.CurrentCell != null && dgvPuantaj.CurrentCell.RowIndex == e.RowIndex);
+                                        Color backColor = e.CellStyle.BackColor;
 
-                                    using (SolidBrush bgBrush = new SolidBrush(backColor))
-                                    {
-                                        e.Graphics.FillRectangle(bgBrush, e.CellBounds);
-                                    }
+                                        // Sadece boyanmamış (beyaz/boş veya haftasonu gri) hücrelerde seçili satır efekti yap
+                                        bool isDefaultColor = (backColor.ToArgb() == Color.White.ToArgb() || backColor.ToArgb() == Color.Empty.ToArgb() || backColor.ToArgb() == Color.FromArgb(245, 245, 245).ToArgb());
 
-                                    // Gün numarasını filigran (watermark) olarak çiz
-                                    string dayNum = (e.ColumnIndex - 1).ToString();
-                                    using (Font wFont = new Font("Segoe UI", 12, FontStyle.Bold))
-                                    {
-                                        SizeF size = e.Graphics.MeasureString(dayNum, wFont);
-                                        PointF pt = new PointF(
-                                            e.CellBounds.Left + (e.CellBounds.Width - size.Width) / 2,
-                                            e.CellBounds.Top + (e.CellBounds.Height - size.Height) / 2
-                                        );
-                                        using (SolidBrush wBrush = new SolidBrush(Color.FromArgb(30, 0, 0, 0))) // yarı saydam
+                                        if (isSelectedRow && isDefaultColor)
                                         {
-                                            e.Graphics.DrawString(dayNum, wFont, wBrush, pt);
+                                            backColor = Color.FromArgb(220, 235, 255); // hafif mavi 
+                                        }
+
+                                        using (SolidBrush bgBrush = new SolidBrush(backColor))
+                                        {
+                                            e.Graphics.FillRectangle(bgBrush, e.CellBounds);
+                                        }
+
+                                        // Gün numarasını filigran (watermark) olarak çiz
+                                        string dayNum = (e.ColumnIndex - 1).ToString();
+                                        using (Font wFont = new Font("Segoe UI", 12, FontStyle.Bold))
+                                        {
+                                            SizeF size = e.Graphics.MeasureString(dayNum, wFont);
+                                            PointF pt = new PointF(
+                                                e.CellBounds.Left + (e.CellBounds.Width - size.Width) / 2,
+                                                e.CellBounds.Top + (e.CellBounds.Height - size.Height) / 2
+                                            );
+                                            using (SolidBrush wBrush = new SolidBrush(Color.FromArgb(30, 0, 0, 0))) // yarı saydam
+                                            {
+                                                e.Graphics.DrawString(dayNum, wFont, wBrush, pt);
+                                            }
+                                        }
+
+                                        // Borderları ve içeriği (X, İ, R vb) normal çizmeye devam et (arka planı çizmeden)
+                                        e.Paint(e.CellBounds, DataGridViewPaintParts.ContentForeground | DataGridViewPaintParts.Border);
+                                        e.Handled = true;
+                                    }
+                                    else if (e.RowIndex >= 0 && (e.ColumnIndex == 0 || e.ColumnIndex == 1))
+                                    {
+                                        // Sol taraftaki isim ve TC kısmı için satır seçiliyse vurgula
+                                        bool isSelectedRow = (dgvPuantaj.CurrentCell != null && dgvPuantaj.CurrentCell.RowIndex == e.RowIndex);
+                                        if (isSelectedRow)
+                                        {
+                                            e.CellStyle.BackColor = Color.FromArgb(220, 235, 255);
+                                        }
+                                        else
+                                        {
+                                            e.CellStyle.BackColor = Color.White;
                                         }
                                     }
+                                };
 
-                                    // Borderları ve içeriği (X, İ, R vb) normal çizmeye devam et (arka planı çizmeden)
-                                    e.Paint(e.CellBounds, DataGridViewPaintParts.ContentForeground | DataGridViewPaintParts.Border);
-                                    e.Handled = true;
-                                }
-                                else if (e.RowIndex >= 0 && (e.ColumnIndex == 0 || e.ColumnIndex == 1))
-                                {
-                                    // Sol taraftaki isim ve TC kısmı için satır seçiliyse vurgula
-                                    bool isSelectedRow = (dgvPuantaj.CurrentCell != null && dgvPuantaj.CurrentCell.RowIndex == e.RowIndex);
-                                    if (isSelectedRow)
-                                    {
-                                        e.CellStyle.BackColor = Color.FromArgb(220, 235, 255);
-                                    }
-                                    else
-                                    {
-                                        e.CellStyle.BackColor = Color.White;
-                                    }
-                                }
-                            };
+                                tabPage.Controls.Add(dgvPuantaj);
+                                kampusGrids[kampus] = dgvPuantaj;
 
-                            tabPage.Controls.Add(dgvPuantaj);
-                            tabControlKampusler.TabPages.Add(tabPage);
-                            kampusGrids[kampus] = dgvPuantaj;
+                                // Grid yapısını oluştur ve verileri yükle
+                                GridOlustur(dgvPuantaj);
+                                VerileriYukle(dgvPuantaj, kampus);
+                                HucreTiklamaOlayiEkle(dgvPuantaj);
+                                FiltreUygula(dgvPuantaj, txtSearch.Text);
+                            }));
+                        }
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
+            }
 
-                            // Grid yapısını oluştur ve verileri yükle
-                            GridOlustur(dgvPuantaj);
-                            VerileriYukle(dgvPuantaj, kampus);
-                            HucreTiklamaOlayiEkle(dgvPuantaj);
+            List<string> FetchKampusListesi()
+            {
+                List<string> kampusListesi = new List<string>();
+                using (var conn = NotDbConnection.GetConnection())
+                {
+                    // Düzeltme SQL: puantajda olup katılımcıda olmayanları ekle ve boş kampüsleri varsayılan Kampüs1 yap
+                    try
+                    {
+                        string fixMissingKatilimci = @"INSERT INTO program_katilimcilari
+                                                       (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi)
+                                                       SELECT p.p_tc, p.p_ad_soyad, COALESCE(p.p_ad,''), COALESCE(p.p_soyad,''), p.p_iban, 'Kampüs1', CURDATE()
+                                                       FROM puantaj p
+                                                       LEFT JOIN program_katilimcilari pk ON pk.pk_tc = p.p_tc
+                                                       WHERE pk.pk_tc IS NULL";
+                        new MySqlCommand(fixMissingKatilimci, conn).ExecuteNonQuery();
+
+                        string fixEmptyCampus = @"UPDATE program_katilimcilari
+                                                  SET pk_gorev_yeri = 'Kampüs1'
+                                                  WHERE pk_gorev_yeri IS NULL OR TRIM(pk_gorev_yeri) = '' OR TRIM(pk_gorev_yeri) = 'Diğer'";
+                        new MySqlCommand(fixEmptyCampus, conn).ExecuteNonQuery();
+                    }
+                    catch { }
+
+                    // Farklı kampüsleri çek (pk_gorev_yeri kolonu kampüs bilgisini tutar)
+                    string sqlKampusler = @"
+                        SELECT DISTINCT COALESCE(NULLIF(TRIM(pk.pk_gorev_yeri), ''), 'Kampüs1') AS kampus
+                        FROM puantaj p
+                        LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
+                        ORDER BY kampus";
+
+                    var cmdKampusler = new MySqlCommand(sqlKampusler, conn);
+                    using (var drKampusler = cmdKampusler.ExecuteReader())
+                    {
+                        while (drKampusler.Read())
+                        {
+                            string kampus = drKampusler["kampus"].ToString();
+                            if (string.IsNullOrEmpty(kampus)) kampus = "Diğer";
+                            kampusListesi.Add(kampus);
                         }
                     }
                 }
-                catch (Exception ex)
+
+                if (kampusListesi.Count == 0)
                 {
-                    MessageBox.Show("Kampüsler yüklenirken hata: " + ex.Message);
-                    // Hata durumunda varsayılan kampüsler oluştur
-                    string[] varsayilanKampusler = { "Kampüs1", "Kampüs2", "Kampüs3" };
-                    foreach (string kampus in varsayilanKampusler)
-                    {
-                        TabPage tabPage = new TabPage { Text = kampus };
-                        DataGridView dgvPuantaj = new DataGridView { Dock = DockStyle.Fill };
-                        tabPage.Controls.Add(dgvPuantaj);
-                        tabControlKampusler.TabPages.Add(tabPage);
-                        kampusGrids[kampus] = dgvPuantaj;
-                    }
+                    kampusListesi.AddRange(new string[] { "Kampüs1", "Kampüs2", "Kampüs3" });
                 }
+
+                return kampusListesi;
             }
 
             void GridOlustur(DataGridView dgvPuantaj)
@@ -331,52 +421,93 @@ namespace denemelikimid
 
             void VerileriYukle(DataGridView dgvPuantaj, string kampus)
             {
+                var donemTarih = secilenTarih;
+                dgvPuantaj.Rows.Clear();
+
+                Task.Run(() => FetchPuantajData(kampus, donemTarih))
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            var ex = t.Exception?.GetBaseException() ?? t.Exception;
+                            MessageBox.Show("Veriler yüklenirken hata: " + ex?.Message);
+                            return;
+                        }
+
+                        if (dgvPuantaj.IsDisposed)
+                        {
+                            return;
+                        }
+
+                        PopulatePuantajGrid(dgvPuantaj, t.Result);
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
+            }
+
+            List<PuantajRowData> FetchPuantajData(string kampus, DateTime donemTarih)
+            {
+                var rows = new List<PuantajRowData>();
+                using (var conn = NotDbConnection.GetConnection())
+                {
+                    string donem = donemTarih.ToString("yyyy-MM");
+                    string sql = @"
+                        SELECT 
+                            pk.pk_tc AS p_tc,
+                            COALESCE(NULLIF(p.p_ad_soyad, ''), NULLIF(pk.pk_ad_soyad, ''), '') AS p_ad_soyad,
+                            COALESCE(p.p_gun_detaylari, '') AS p_gun_detaylari
+                        FROM program_katilimcilari pk
+                        LEFT JOIN puantaj p ON p.p_tc = pk.pk_tc AND p.p_yil_ay = @donem
+                        WHERE COALESCE(NULLIF(TRIM(pk.pk_gorev_yeri), ''), 'Kampüs1') = @kampus
+                        ORDER BY p_ad_soyad, p_tc";
+
+                    var cmd = new MySqlCommand(sql, conn);
+                    cmd.Parameters.AddWithValue("@kampus", kampus);
+                    cmd.Parameters.AddWithValue("@donem", donem);
+                    using (var dr = cmd.ExecuteReader())
+                    {
+                        while (dr.Read())
+                        {
+                            rows.Add(new PuantajRowData(
+                                dr["p_tc"].ToString(),
+                                dr["p_ad_soyad"].ToString(),
+                                dr["p_gun_detaylari"].ToString()));
+                        }
+                    }
+                }
+
+                return rows;
+            }
+
+            void PopulatePuantajGrid(DataGridView dgvPuantaj, List<PuantajRowData> rows)
+            {
+                dgvPuantaj.SuspendLayout();
                 try
                 {
-                    using (var conn = NotDbConnection.GetConnection())
+                    dgvPuantaj.Rows.Clear();
+                    foreach (var row in rows)
                     {
-                        string donem = secilenTarih.ToString("yyyy-MM");
-                        string sql = @"
-                            SELECT p.p_tc, p.p_ad_soyad,
-                                   MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_gun_detaylari ELSE NULL END) AS p_gun_detaylari
-                            FROM puantaj p
-                            LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
-                            WHERE COALESCE(pk.pk_gorev_yeri, 'Diğer') = @kampus
-                            GROUP BY p.p_tc, p.p_ad_soyad";
+                        int rowIndex = dgvPuantaj.Rows.Add();
+                        dgvPuantaj.Rows[rowIndex].Cells[0].Value = row.Tc;
+                        dgvPuantaj.Rows[rowIndex].Cells[1].Value = row.AdSoyad;
+                        dgvPuantaj.Rows[rowIndex].Tag = row.Tc;
 
-                        var cmd = new MySqlCommand(sql, conn);
-                        cmd.Parameters.AddWithValue("@kampus", kampus);
-                        cmd.Parameters.AddWithValue("@donem", donem);
-                        using (var dr = cmd.ExecuteReader())
+                        if (!string.IsNullOrEmpty(row.Detay))
                         {
-                            while (dr.Read())
+                            string[] gunler = row.Detay.Split('-');
+                            for (int i = 0; i < gunler.Length && i < dgvPuantaj.Columns.Count - 2; i++)
                             {
-                                int rowIndex = dgvPuantaj.Rows.Add();
-                                dgvPuantaj.Rows[rowIndex].Cells[0].Value = dr["p_tc"].ToString();
-                                dgvPuantaj.Rows[rowIndex].Cells[1].Value = dr["p_ad_soyad"].ToString();
-                                dgvPuantaj.Rows[rowIndex].Tag = dr["p_tc"].ToString();
-
-                                string detay = dr["p_gun_detaylari"].ToString();
-                                if (!string.IsNullOrEmpty(detay))
-                                {
-                                    string[] gunler = detay.Split('-');
-                                    for (int i = 0; i < gunler.Length && i < dgvPuantaj.Columns.Count - 2; i++)
-                                    {
-                                        string val = gunler[i] == "0" ? "" : gunler[i];
-                                        var cell = dgvPuantaj.Rows[rowIndex].Cells[i + 2];
-                                        cell.Value = val;
-                                        if (val == "X") cell.Style.BackColor = Color.LightGreen;
-                                        else if (val == "İ") cell.Style.BackColor = Color.LightYellow;
-                                        else if (val == "R") cell.Style.BackColor = Color.LightPink;
-                                    }
-                                }
+                                string val = gunler[i] == "0" ? "" : gunler[i];
+                                var cell = dgvPuantaj.Rows[rowIndex].Cells[i + 2];
+                                cell.Value = val;
+                                if (val == "X") cell.Style.BackColor = Color.LightGreen;
+                                else if (val == "İ") cell.Style.BackColor = Color.LightYellow;
+                                else if (val == "R") cell.Style.BackColor = Color.LightPink;
                             }
                         }
                     }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    MessageBox.Show("Veriler yüklenirken hata: " + ex.Message);
+                    dgvPuantaj.ResumeLayout();
                 }
             }
 
@@ -473,8 +604,34 @@ namespace denemelikimid
                 };
             }
 
+            void FiltreUygula(DataGridView dgvPuantaj, string arama)
+            {
+                string kriter = (arama ?? string.Empty).Trim();
+                foreach (DataGridViewRow row in dgvPuantaj.Rows)
+                {
+                    if (row.IsNewRow) continue;
+                    string tc = row.Cells[0].Value?.ToString() ?? string.Empty;
+                    string adSoyad = row.Cells[1].Value?.ToString() ?? string.Empty;
+                    bool goster = string.IsNullOrEmpty(kriter) ||
+                                 tc.IndexOf(kriter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                 adSoyad.IndexOf(kriter, StringComparison.OrdinalIgnoreCase) >= 0;
+                    row.Visible = goster;
+                }
+            }
+
+            void TumGridleriFiltrele()
+            {
+                string arama = txtSearch.Text;
+                foreach (var grid in kampusGrids.Values)
+                {
+                    FiltreUygula(grid, arama);
+                }
+            }
+
             // OLAYLAR
             KampusleriYukle();
+
+            txtSearch.TextChanged += (s, e) => TumGridleriFiltrele();
 
             dtpDonem.ValueChanged += (s, e) =>
             {
@@ -620,7 +777,13 @@ namespace denemelikimid
                         templatePath = ofdTemplate.FileName;
                     }
                     // Kaydetme yeri seç
-                    string ilkKampus = kampusGrids.Keys.FirstOrDefault() ?? "Kampüs1";
+                    bool exportSadeceSeciliKampus = cmbExportScope.SelectedIndex == 1;
+                    string seciliKampusText = tabControlKampusler.SelectedTab?.Text;
+
+                    string ilkKampus = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText) 
+                                       ? seciliKampusText 
+                                       : (kampusGrids.Keys.FirstOrDefault() ?? "Kampüs1");
+
                     Dictionary<string, string> kampusNumaralari = new Dictionary<string, string>
                     {
                         { "Kampüs1", "13376" },
@@ -629,7 +792,9 @@ namespace denemelikimid
                     };
                     string dosyaKampusNo = kampusNumaralari.ContainsKey(ilkKampus) ? kampusNumaralari[ilkKampus] : "13376";
                     string dosyaAyAdi = dtpDonem.Value.ToString("MMMM", new CultureInfo("tr-TR"));
-                    string dosyaAdi = $"{dosyaKampusNo} BUÜ BORDRO VE PUANTAJ {dosyaAyAdi} {dtpDonem.Value.Year}";
+                    string dosyaAdi = exportSadeceSeciliKampus 
+                                      ? $"{dosyaKampusNo} BUÜ BORDRO VE PUANTAJ {dosyaAyAdi} {dtpDonem.Value.Year}" 
+                                      : $"TUM_KAMPUSLER_BUÜ BORDRO VE PUANTAJ {dosyaAyAdi} {dtpDonem.Value.Year}";
 
                     SaveFileDialog sfd = new SaveFileDialog
                     {
@@ -652,52 +817,197 @@ namespace denemelikimid
                         {
                             using (var workbook = new XLWorkbook(savePath))
                             {
-                                // Şablondaki "Puantaj" sayfasını 3 kampüs için kopyala ve her birini ayrı doldur
+                                // Şablondaki "Puantaj" sayfasını kopyala ve her birini ayrı doldur
                                 if (workbook.Worksheets.Any(w => w.Name.Equals("PUANTAJ", StringComparison.OrdinalIgnoreCase)))
                                 {
                                     var templateWs = workbook.Worksheets.First(w => w.Name.Equals("PUANTAJ", StringComparison.OrdinalIgnoreCase));
                                     string origSheetName = templateWs.Name;
-                                    var kampusListesi = kampusGrids.Keys.ToArray();
+
+                                    var kampusListesi = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText)
+                                                        ? new string[] { seciliKampusText }
+                                                        : kampusGrids.Keys.ToArray();
+
                                     var kampusSheets = new List<IXLWorksheet>();
-                                    foreach (var kName in kampusListesi)
+                                    if (exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText))
                                     {
-                                        kampusSheets.Add(templateWs.CopyTo(kName));
+                                        templateWs.Name = "PUANTAJ";
+                                        templateWs.Visibility = XLWorksheetVisibility.Visible;
+                                        kampusSheets.Add(templateWs);
                                     }
-                                    workbook.Worksheet(origSheetName).Visibility = XLWorksheetVisibility.VeryHidden;
-                                    for (int i = 0; i < kampusSheets.Count; i++)
-                                        kampusSheets[i].Position = i + 1;
+                                    else
+                                    {
+                                        foreach (var kName in kampusListesi)
+                                        {
+                                            kampusSheets.Add(templateWs.CopyTo(kName));
+                                        }
+                                        workbook.Worksheet(origSheetName).Visibility = XLWorksheetVisibility.VeryHidden;
+                                        for (int i = 0; i < kampusSheets.Count; i++)
+                                            kampusSheets[i].Position = i + 1;
+                                    }
+
+                                    var bankaSheet = workbook.Worksheets.FirstOrDefault(w => w.Name.Replace(" ", "").ToUpperInvariant().Contains("BANKA"));
+                                    if (bankaSheet != null)
+                                    {
+                                        string formulaSheetName = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText)
+                                            ? "PUANTAJ"
+                                            : kampusListesi.FirstOrDefault();
+
+                                        if (!string.IsNullOrEmpty(formulaSheetName))
+                                        {
+                                            foreach (var cell in bankaSheet.CellsUsed(c => c.HasFormula))
+                                            {
+                                                var formula = cell.FormulaA1;
+                                                if (string.IsNullOrEmpty(formula)) continue;
+                                                string updated = formula
+                                                    .Replace("'PUANTAJ'", $"'{formulaSheetName}'")
+                                                    .Replace("'Puantaj'", $"'{formulaSheetName}'")
+                                                    .Replace("PUANTAJ", formulaSheetName)
+                                                    .Replace("Puantaj", formulaSheetName);
+                                                if (!string.Equals(updated, formula, StringComparison.Ordinal))
+                                                {
+                                                    cell.FormulaA1 = updated;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Action<string> updatePuantajHeader = (kampusName) =>
+                                    {
+                                        if (string.IsNullOrEmpty(kampusName)) return;
+                                        string kampusNo = kampusNumaralari.ContainsKey(kampusName) ? kampusNumaralari[kampusName] : "13376";
+                                        string kampusLabel = kampusName.Replace("Kampüs", "KAMPÜS ");
+                                        string headerText = $"BURSA ULUDAĞ ÜNİVERSİTESİ GENEL SEKRETERLİK ÖZEL KALEM {kampusNo} PORTAL NOLU {kampusLabel} İŞKUR GENÇLİK PROGRAMI KATILIMCI GÜN ÇİZELGESİ";
+
+                                        var headerCell = templateWs.Cell(2, 2);
+                                        var merged = headerCell.MergedRange();
+                                        if (merged != null)
+                                        {
+                                            merged.Value = headerText;
+                                        }
+                                        else
+                                        {
+                                            headerCell.Value = headerText;
+                                        }
+                                    };
+
+                                    Action<IXLWorksheet, string> updateBankaHeader = (sheet, kampusName) =>
+                                    {
+                                        if (sheet == null || string.IsNullOrEmpty(kampusName)) return;
+                                        string kampusNo = kampusNumaralari.ContainsKey(kampusName) ? kampusNumaralari[kampusName] : "13376";
+                                        string kampusLabel = kampusName.Replace("Kampüs", "KAMPÜS ");
+                                        string headerText = $"BURSA ULUDAĞ ÜNİVERİSTESİ İŞKUR GENÇLİK PROGRAMI {kampusNo} PORTAL NOLU {kampusLabel} BANKA LİSTESİ";
+
+                                        var headerCell = sheet.Cell(1, 2);
+                                        var merged = headerCell.MergedRange();
+                                        if (merged != null)
+                                        {
+                                            merged.Value = headerText;
+                                            try { merged.Style.Font.Bold = true; } catch { }
+                                        }
+                                        else
+                                        {
+                                            headerCell.Value = headerText;
+                                            try { headerCell.Style.Font.Bold = true; } catch { }
+                                        }
+                                    };
+
+                                    Action<IXLWorksheet, string> updateBordroHeader = (sheet, kampusName) =>
+                                    {
+                                        if (sheet == null || string.IsNullOrEmpty(kampusName)) return;
+                                        string kampusNo = kampusNumaralari.ContainsKey(kampusName) ? kampusNumaralari[kampusName] : "13376";
+                                        string kampusLabel = kampusName.Replace("Kampüs", "KAMPÜS ");
+                                        string headerText = $"BURSA ULUDAĞ ÜNİVERSİTESİ GENEL SEKRETERLİK ÖZEL KALEM {kampusNo} PORTAL NOLU {kampusLabel} İŞKUR GENÇLİK PROGRAMI ÖDEME BORDROSU";
+
+                                        var headerCell = sheet.Cell(2, 1);
+                                        var merged = headerCell.MergedRange();
+                                        if (merged != null)
+                                        {
+                                            merged.Value = headerText;
+                                        }
+                                        else
+                                        {
+                                            headerCell.Value = headerText;
+                                        }
+                                    };
+
+                                    if (exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText))
+                                    {
+                                        var bordroSheet = workbook.Worksheets.FirstOrDefault(w => w.Name.Replace(" ", "").ToUpperInvariant().Contains("BORDRO"));
+                                        updateBordroHeader(bordroSheet, seciliKampusText);
+                                        updatePuantajHeader(seciliKampusText);
+                                        updateBankaHeader(bankaSheet, seciliKampusText);
+                                    }
+                                    else
+                                    {
+                                        foreach (var kampus in kampusListesi)
+                                        {
+                                            var bordroSheet = workbook.Worksheets.FirstOrDefault(w =>
+                                                w.Name.Replace(" ", "").ToUpperInvariant().Contains("BORDRO") &&
+                                                w.Name.Replace(" ", "").IndexOf(kampus, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                                            updateBordroHeader(bordroSheet, kampus);
+                                            updateBankaHeader(bankaSheet, kampus);
+                                        }
+                                    }
 
                                     foreach (var ws in kampusSheets)
                                     {
-                                        string currentKampus = ws.Name;
+                                        string currentKampus = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText)
+                                            ? seciliKampusText
+                                            : ws.Name;
 
                                     // Bul header satırını ve ilgili sütun indekslerini tespit et
                                     int headerRow = -1;
-                                    int maxSearchRow = 20;
-                                    int maxSearchCol = 40;
-                                    int tcCol = -1, adCol = -1, soyadCol = -1, ibanCol = -1;
+                                    int maxSearchRow = 30;
+                                    int maxSearchCol = 80;
+                                    int tcCol = -1, adCol = -1, soyadCol = -1, ibanCol = -1, siraCol = -1;
 
                                     for (int r = 1; r <= maxSearchRow; r++)
                                     {
+                                        int tempTc = -1, tempAd = -1, tempSoyad = -1, tempIban = -1, tempSira = -1;
                                         for (int c = 1; c <= maxSearchCol; c++)
                                         {
                                             string hv = ws.Cell(r, c).GetString()?.Trim();
                                             if (string.IsNullOrEmpty(hv)) continue;
                                             string hvUp = hv.ToUpperInvariant();
-                                            // More flexible matching: accept variants like 'TC KIMLIK', 'T.C.', 'TC'
-                                            if ((hvUp.Contains("TC") || hvUp.Contains("T.C") || hvUp.Contains("TCKIMLIK") || hvUp.Contains("TC KIMLIK") || hvUp.Contains("TC KİMLİK")) && headerRow == -1)
+                                            string clean = hvUp.Replace(" ", "").Replace(".", "");
+
+                                            if ((clean == "TC" || clean == "TCKIMLIK" || clean == "TCKİMLİK" || clean == "TCKIMLIKNO" || clean == "TCKİMLİKNO" || clean == "TCNO" || clean.StartsWith("TCKIM")) && tempTc == -1)
                                             {
-                                                headerRow = r; tcCol = c;
+                                                tempTc = c;
                                             }
-                                            if ((hvUp.Contains("AD SOYAD") || hvUp.Contains("AD") && hvUp.Contains("SOYAD")) && adCol == -1)
+                                            else if ((clean == "ADSOYAD" || clean == "ADISOYADI" || clean == "ADVEYASOYAD") && tempAd == -1)
                                             {
-                                                adCol = c;
+                                                tempAd = c;
                                             }
-                                            else if (hvUp.Contains("SOYAD") && soyadCol == -1) { soyadCol = c; }
-                                            else if (hvUp.Contains("IBAN") && ibanCol == -1) { ibanCol = c; }
-                                            else if (hvUp.Contains("SIRA") && hvUp.Length < 10) { /* possible SIRA column, ignore for headerRow detection */ }
+                                            else if ((clean == "AD" || clean == "ADI") && tempAd == -1)
+                                            {
+                                                tempAd = c;
+                                            }
+                                            else if ((clean == "SOYAD" || clean == "SOYADI") && tempSoyad == -1)
+                                            {
+                                                tempSoyad = c;
+                                            }
+                                            else if (clean.Contains("IBAN") && tempIban == -1)
+                                            {
+                                                tempIban = c;
+                                            }
+                                            else if ((clean == "SIRA" || clean == "SIRANO") && tempSira == -1)
+                                            {
+                                                tempSira = c;
+                                            }
                                         }
-                                        if (headerRow != -1 && (adCol != -1 || soyadCol != -1)) break;
+
+                                        if (tempTc != -1 && (tempAd != -1 || tempSoyad != -1))
+                                        {
+                                            headerRow = r;
+                                            tcCol = tempTc;
+                                            adCol = tempAd;
+                                            soyadCol = tempSoyad;
+                                            ibanCol = tempIban;
+                                            siraCol = tempSira;
+                                            break;
+                                        }
                                     }
 
                                     // Log header row detection for debugging
@@ -817,11 +1127,17 @@ namespace denemelikimid
                                                     if (hvUp.Contains(" AY") || hvUp == "AY" || hvUp.Contains("AY ") && ayLabelRow == -1) { ayLabelRow = r; ayLabelCol = c; }
 
                                                     // hire/exit headers detection (various variants)
-                                                    if ((hvUp.Contains("İŞE GİRİŞ") || hvUp.Contains("ISE GIRIS") || hvUp.Contains("İŞE GİRİŞ TARİH") || hvUp.Contains("GİRİŞ TARİH")) && iseBaslamaCol <= 0)
+                                                    string cleanHv = hv.Trim().ToUpperInvariant()
+                                                        .Replace("İ", "I").Replace("Ş", "S")
+                                                        .Replace("Ğ", "G").Replace("Ü", "U")
+                                                        .Replace("Ö", "O").Replace("Ç", "C")
+                                                        .Replace(" ", "").Replace("\n", "").Replace("\r", "").Replace(".", "");
+
+                                                    if ((cleanHv.Contains("ISEGIRIS") || cleanHv.Contains("GIRISTARIH") || cleanHv.Contains("BASLAMATARIH")) && iseBaslamaCol <= 0)
                                                     {
                                                         iseBaslamaCol = c;
                                                     }
-                                                    if ((hvUp.Contains("İŞTEN ÇIKIŞ") || hvUp.Contains("İŞTEN AYRILMA") || hvUp.Contains("AYRILMA TARİH") || hvUp.Contains("ÇIKIŞ TARİH")) && iseAyrilmaCol <= 0)
+                                                    if ((cleanHv.Contains("ISTENCIKIS") || cleanHv.Contains("ISTENAYRILMA") || cleanHv.Contains("AYRILMATARIH") || cleanHv.Contains("CIKISTARIH")) && iseAyrilmaCol <= 0)
                                                     {
                                                         iseAyrilmaCol = c;
                                                     }
@@ -943,14 +1259,45 @@ namespace denemelikimid
                                         // DB'den kampüse ait katılımcıları çek ve sayfaya sırayla yaz
                                         using (var conn = NotDbConnection.GetConnection())
                                         {
-                                            string sqlAll = @"SELECT p.p_iban, p.p_tc, p.p_ad_soyad, COALESCE(p.p_ad, '') AS p_ad, COALESCE(p.p_soyad, '') AS p_soyad, p.p_gun_detaylari, p.p_ise_baslama_tarihi AS p_ise_baslama_tarihi, p.p_isten_ayrilma_tarihi AS p_isten_ayrilma_tarihi,
-                                                              p.p_calistigi_gun_sayisi, p.p_devamsizlik, p.p_yillik_izin,
-                                                              pk.pk_is_baslama_tarihi AS pk_ise_baslama, pk.pk_isten_ayrilma_tarihi AS pk_isten_ayrilma
+                                            string sqlAll = @"SELECT 
+                                                              p.p_tc AS p_tc,
+                                                              COALESCE(
+                                                                  MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_iban, '') END),
+                                                                  MAX(NULLIF(p.p_iban, '')),
+                                                                  NULLIF(MAX(pk.pk_iban_no), ''),
+                                                                  '') AS p_iban,
+                                                              COALESCE(
+                                                                  MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_ad_soyad, '') END),
+                                                                  MAX(NULLIF(p.p_ad_soyad, '')),
+                                                                  NULLIF(MAX(pk.pk_ad_soyad), ''),
+                                                                  '') AS p_ad_soyad,
+                                                              COALESCE(
+                                                                  MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_ad, '') END),
+                                                                  MAX(NULLIF(p.p_ad, '')),
+                                                                  NULLIF(MAX(pk.pk_ad), ''),
+                                                                  '') AS p_ad,
+                                                              COALESCE(
+                                                                  MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_soyad, '') END),
+                                                                  MAX(NULLIF(p.p_soyad, '')),
+                                                                  NULLIF(MAX(pk.pk_soyad), ''),
+                                                                  '') AS p_soyad,
+                                                              COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_gun_detaylari END), '') AS p_gun_detaylari,
+                                                              MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_ise_baslama_tarihi END) AS p_ise_baslama_tarihi,
+                                                              MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_isten_ayrilma_tarihi END) AS p_isten_ayrilma_tarihi,
+                                                              COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_calistigi_gun_sayisi END), 0) AS p_calistigi_gun_sayisi,
+                                                              COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_devamsizlik END), 0) AS p_devamsizlik,
+                                                              COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_yillik_izin END), 0) AS p_yillik_izin,
+                                                              MAX(pk.pk_is_baslama_tarihi) AS pk_ise_baslama,
+                                                              MAX(pk.pk_isten_ayrilma_tarihi) AS pk_isten_ayrilma
                                                               FROM puantaj p
                                                               LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
-                                                              WHERE COALESCE(pk.pk_gorev_yeri, 'Diğer') = @kampus
-                                                                AND p.p_yil_ay = @donem
-                                                              ORDER BY COALESCE(p.p_ad, p.p_ad_soyad)";
+                                                              WHERE COALESCE(NULLIF(TRIM(pk.pk_gorev_yeri), ''), 'Kampüs1') = @kampus
+                                                              GROUP BY p.p_tc
+                                                              ORDER BY COALESCE(
+                                                                  MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_ad, '') END),
+                                                                  MAX(NULLIF(p.p_ad, '')),
+                                                                  MAX(NULLIF(p.p_ad_soyad, '')),
+                                                                  p.p_tc)";
                                             using (var cmdAll = new MySqlCommand(sqlAll, conn))
                                             {
                                             cmdAll.Parameters.AddWithValue("@kampus", currentKampus);
@@ -1133,10 +1480,18 @@ namespace denemelikimid
                                                 }
                                                 catch { }
 
+                                                int exportedRowCount = 0;
                                                 while (drAll.Read())
                                                 {
                                                     string tc = drAll["p_tc"]?.ToString() ?? "";
                                                     if (string.IsNullOrEmpty(tc)) continue;
+
+                                                    if (siraCol > 0)
+                                                    {
+                                                        var csira = ws.Cell(writeRow, siraCol);
+                                                        csira.Value = siraNo;
+                                                        try { csira.Style.Font.FontName = "Segoe UI"; csira.Style.Font.FontSize = 9; csira.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; csira.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; csira.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; csira.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; csira.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
+                                                    }
 
                                                     if (ibanCol > 0)
                                                     {
@@ -1187,10 +1542,31 @@ namespace denemelikimid
                                                         catch { }
                                                     }
 
-                                                    // Gün detaylarını yaz (p_gun_detaylari -> '-' ile ayrılmış)
+                                                    // Gün detaylarını yaz (Öncelikle grid'den al, yoksa p_gun_detaylari)
                                                     try
                                                     {
-                                                        string gunDetaylari = drAll["p_gun_detaylari"]?.ToString() ?? "";
+                                                        string gunDetaylari = "";
+                                                        if (kampusGrids.ContainsKey(currentKampus))
+                                                        {
+                                                            var grid = kampusGrids[currentKampus];
+                                                            var gridRow = grid.Rows.Cast<DataGridViewRow>().FirstOrDefault(rw => rw.Cells[0].Value?.ToString() == tc);
+                                                            if (gridRow != null)
+                                                            {
+                                                                List<string> days = new List<string>();
+                                                                for (int i = 2; i < grid.Columns.Count; i++)
+                                                                {
+                                                                    string cv = gridRow.Cells[i].Value?.ToString() ?? "";
+                                                                    days.Add(string.IsNullOrEmpty(cv) ? "0" : cv);
+                                                                }
+                                                                gunDetaylari = string.Join("-", days);
+                                                            }
+                                                        }
+
+                                                        if (string.IsNullOrEmpty(gunDetaylari) || gunDetaylari.Replace("-", "").Replace("0", "") == "")
+                                                        {
+                                                            gunDetaylari = drAll["p_gun_detaylari"]?.ToString() ?? "";
+                                                        }
+
                                                         if (!string.IsNullOrEmpty(gunDetaylari))
                                                         {
                                                             string[] gunler = gunDetaylari.Split('-');
@@ -1257,7 +1633,9 @@ namespace denemelikimid
                                                                 if (!drAll.IsDBNull(ordPk))
                                                                 {
                                                                     DateTime iseBaslama = Convert.ToDateTime(drAll.GetValue(ordPk));
-                                                                    ws.Cell(writeRow, iseBaslamaCol).Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                    var cDate = ws.Cell(writeRow, iseBaslamaCol);
+                                                                    cDate.Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                    try { cDate.Style.Font.FontName = "Segoe UI"; cDate.Style.Font.FontSize = 9; cDate.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     wrote = true;
                                                                 }
                                                             }
@@ -1271,7 +1649,9 @@ namespace denemelikimid
                                                                     if (!drAll.IsDBNull(ordP))
                                                                     {
                                                                         DateTime iseBaslama = Convert.ToDateTime(drAll.GetValue(ordP));
-                                                                        ws.Cell(writeRow, iseBaslamaCol).Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                        var cDate = ws.Cell(writeRow, iseBaslamaCol);
+                                                                        cDate.Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                        try { cDate.Style.Font.FontName = "Segoe UI"; cDate.Style.Font.FontSize = 9; cDate.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDate.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     }
                                                                 }
                                                                 catch (IndexOutOfRangeException) { }
@@ -1287,7 +1667,9 @@ namespace denemelikimid
                                                                 if (!drAll.IsDBNull(ordPk2))
                                                                 {
                                                                     DateTime iseAyrilma = Convert.ToDateTime(drAll.GetValue(ordPk2));
-                                                                    ws.Cell(writeRow, iseAyrilmaCol).Value = iseAyrilma.ToString("dd.MM.yyyy");
+                                                                    var cDateEx = ws.Cell(writeRow, iseAyrilmaCol);
+                                                                    cDateEx.Value = iseAyrilma.ToString("dd.MM.yyyy");
+                                                                    try { cDateEx.Style.Font.FontName = "Segoe UI"; cDateEx.Style.Font.FontSize = 9; cDateEx.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     wrote2 = true;
                                                                 }
                                                             }
@@ -1301,7 +1683,9 @@ namespace denemelikimid
                                                                     if (!drAll.IsDBNull(ordP2))
                                                                     {
                                                                         DateTime iseAyrilma = Convert.ToDateTime(drAll.GetValue(ordP2));
-                                                                        ws.Cell(writeRow, iseAyrilmaCol).Value = iseAyrilma.ToString("dd.MM.yyyy");
+                                                                        var cDateEx = ws.Cell(writeRow, iseAyrilmaCol);
+                                                                        cDateEx.Value = iseAyrilma.ToString("dd.MM.yyyy");
+                                                                        try { cDateEx.Style.Font.FontName = "Segoe UI"; cDateEx.Style.Font.FontSize = 9; cDateEx.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cDateEx.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     }
                                                                 }
                                                                 catch (IndexOutOfRangeException) { }
@@ -1312,7 +1696,10 @@ namespace denemelikimid
 
                                                     siraNo++;
                                                     writeRow++;
+                                                    exportedRowCount++;
                                                 }
+
+                                                try { SimpleLogger.Log($"Excel export sheet '{currentKampus}' wrote rows: {exportedRowCount}"); } catch { }
                                             }
                                             }
                                         }
@@ -1322,7 +1709,11 @@ namespace denemelikimid
                                 else
                                 {
                                     // Eğer PUANTAJ sayfası yoksa önceki davranış: her kampüs için ayrı sayfa doldur
-                                    foreach (var kvp in kampusGrids)
+                                    var filtreliGrids = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText) 
+                                                        ? kampusGrids.Where(k => k.Key == seciliKampusText).ToDictionary(x => x.Key, x => x.Value)
+                                                        : kampusGrids;
+
+                                    foreach (var kvp in filtreliGrids)
                                     {
                                         string kampus = kvp.Key;
                                         string kampusNo = kampusNumaralari.ContainsKey(kampus) ? kampusNumaralari[kampus] : "13376";
@@ -1358,15 +1749,49 @@ namespace denemelikimid
 
                                         using (var conn = NotDbConnection.GetConnection())
                                         {
-                                            string sql = @"SELECT p.p_iban, p.p_tc, p.p_ad_soyad, COALESCE(p.p_ad, '') AS p_ad, COALESCE(p.p_soyad, '') AS p_soyad, p.p_gun_detaylari, p.p_ise_baslama_tarihi AS p_ise_baslama_tarihi, p.p_isten_ayrilma_tarihi AS p_isten_ayrilma_tarihi, 
-                                                           p.p_calistigi_gun_sayisi, p.p_devamsizlik, p.p_yillik_izin,
-                                                           pk.pk_is_baslama_tarihi AS pk_ise_baslama, pk.pk_isten_ayrilma_tarihi AS pk_isten_ayrilma
+                                            string sql = @"SELECT 
+                                                           p.p_tc,
+                                                           COALESCE(
+                                                               MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_iban, '') END),
+                                                               MAX(NULLIF(p.p_iban, '')),
+                                                               NULLIF(MAX(pk.pk_iban_no), ''),
+                                                               '') AS p_iban,
+                                                           COALESCE(
+                                                               MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_ad_soyad, '') END),
+                                                               MAX(NULLIF(p.p_ad_soyad, '')),
+                                                               NULLIF(MAX(pk.pk_ad_soyad), ''),
+                                                               '') AS p_ad_soyad,
+                                                           COALESCE(
+                                                               MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_ad, '') END),
+                                                               MAX(NULLIF(p.p_ad, '')),
+                                                               NULLIF(MAX(pk.pk_ad), ''),
+                                                               '') AS p_ad,
+                                                           COALESCE(
+                                                               MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_soyad, '') END),
+                                                               MAX(NULLIF(p.p_soyad, '')),
+                                                               NULLIF(MAX(pk.pk_soyad), ''),
+                                                               '') AS p_soyad,
+                                                           COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_gun_detaylari END), '') AS p_gun_detaylari,
+                                                           MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_ise_baslama_tarihi END) AS p_ise_baslama_tarihi,
+                                                           MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_isten_ayrilma_tarihi END) AS p_isten_ayrilma_tarihi,
+                                                           COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_calistigi_gun_sayisi END), 0) AS p_calistigi_gun_sayisi,
+                                                           COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_devamsizlik END), 0) AS p_devamsizlik,
+                                                           COALESCE(MAX(CASE WHEN p.p_yil_ay = @donem THEN p.p_yillik_izin END), 0) AS p_yillik_izin,
+                                                           MAX(pk.pk_is_baslama_tarihi) AS pk_ise_baslama,
+                                                           MAX(pk.pk_isten_ayrilma_tarihi) AS pk_isten_ayrilma
                                                            FROM puantaj p
                                                            LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
-                                                           WHERE COALESCE(pk.pk_gorev_yeri, 'Diğer') = @kampus";
+                                                           WHERE COALESCE(NULLIF(TRIM(pk.pk_gorev_yeri), ''), 'Kampüs1') = @kampus
+                                                           GROUP BY p.p_tc
+                                                           ORDER BY COALESCE(
+                                                               MAX(CASE WHEN p.p_yil_ay = @donem THEN NULLIF(p.p_ad, '') END),
+                                                               MAX(NULLIF(p.p_ad, '')),
+                                                               MAX(NULLIF(p.p_ad_soyad, '')),
+                                                               p.p_tc)";
                                             using (var cmd = new MySqlCommand(sql, conn))
                                             {
                                                 cmd.Parameters.AddWithValue("@kampus", kampus);
+                                                cmd.Parameters.AddWithValue("@donem", $"{donemYear:D4}-{donemMonth:D2}");
                                                 using (var dr = cmd.ExecuteReader())
                                                 {
                                                     int siraNo = 1;
@@ -1412,7 +1837,28 @@ namespace denemelikimid
                                                         ws.Cell(writeRow, 4).Value = dbAd;
                                                         ws.Cell(writeRow, 5).Value = dbSoyad;
 
-                                                        string gunDetaylari = dr["p_gun_detaylari"]?.ToString() ?? "";
+                                                        string gunDetaylari = "";
+                                                        if (kampusGrids.ContainsKey(kampus))
+                                                        {
+                                                            var grid = kampusGrids[kampus];
+                                                            var gridRow = grid.Rows.Cast<DataGridViewRow>().FirstOrDefault(rw => rw.Cells[0].Value?.ToString() == tc);
+                                                            if (gridRow != null)
+                                                            {
+                                                                List<string> days = new List<string>();
+                                                                for (int i = 2; i < grid.Columns.Count; i++)
+                                                                {
+                                                                    string cv = gridRow.Cells[i].Value?.ToString() ?? "";
+                                                                    days.Add(string.IsNullOrEmpty(cv) ? "0" : cv);
+                                                                }
+                                                                gunDetaylari = string.Join("-", days);
+                                                            }
+                                                        }
+
+                                                        if (string.IsNullOrEmpty(gunDetaylari) || gunDetaylari.Replace("-", "").Replace("0", "") == "")
+                                                        {
+                                                            gunDetaylari = dr["p_gun_detaylari"]?.ToString() ?? "";
+                                                        }
+
                                                         string[] gunler = gunDetaylari.Split('-');
                                                         int calisilanGunSayisi = 0;
                                                         int raporluGunSayisi = 0;
@@ -1446,7 +1892,9 @@ namespace denemelikimid
                                                                 if (!dr.IsDBNull(ordPkStart))
                                                                 {
                                                                     DateTime iseBaslama = Convert.ToDateTime(dr.GetValue(ordPkStart));
-                                                                    ws.Cell(writeRow, ozetKolonBaslangic + 3).Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                    var cellStart = ws.Cell(writeRow, ozetKolonBaslangic + 3);
+                                                                    cellStart.Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                    try { cellStart.Style.Font.FontName = "Segoe UI"; cellStart.Style.Font.FontSize = 9; cellStart.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     wrotePkStart = true;
                                                                 }
                                                             }
@@ -1460,7 +1908,9 @@ namespace denemelikimid
                                                                     if (!dr.IsDBNull(ordPStart))
                                                                     {
                                                                         DateTime iseBaslama = Convert.ToDateTime(dr.GetValue(ordPStart));
-                                                                        ws.Cell(writeRow, ozetKolonBaslangic + 3).Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                        var cellStart = ws.Cell(writeRow, ozetKolonBaslangic + 3);
+                                                                        cellStart.Value = iseBaslama.ToString("dd.MM.yyyy");
+                                                                        try { cellStart.Style.Font.FontName = "Segoe UI"; cellStart.Style.Font.FontSize = 9; cellStart.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellStart.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     }
                                                                 }
                                                                 catch (IndexOutOfRangeException) { }
@@ -1477,7 +1927,9 @@ namespace denemelikimid
                                                                 if (!dr.IsDBNull(ordPkEnd))
                                                                 {
                                                                     DateTime istAyrilma = Convert.ToDateTime(dr.GetValue(ordPkEnd));
-                                                                    ws.Cell(writeRow, ozetKolonBaslangic + 4).Value = istAyrilma.ToString("dd.MM.yyyy");
+                                                                    var cellEnd = ws.Cell(writeRow, ozetKolonBaslangic + 4);
+                                                                    cellEnd.Value = istAyrilma.ToString("dd.MM.yyyy");
+                                                                    try { cellEnd.Style.Font.FontName = "Segoe UI"; cellEnd.Style.Font.FontSize = 9; cellEnd.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     wrotePkEnd = true;
                                                                 }
                                                             }
@@ -1491,7 +1943,9 @@ namespace denemelikimid
                                                                     if (!dr.IsDBNull(ordPEnd))
                                                                     {
                                                                         DateTime istAyrilma = Convert.ToDateTime(dr.GetValue(ordPEnd));
-                                                                        ws.Cell(writeRow, ozetKolonBaslangic + 4).Value = istAyrilma.ToString("dd.MM.yyyy");
+                                                                        var cellEnd = ws.Cell(writeRow, ozetKolonBaslangic + 4);
+                                                                        cellEnd.Value = istAyrilma.ToString("dd.MM.yyyy");
+                                                                        try { cellEnd.Style.Font.FontName = "Segoe UI"; cellEnd.Style.Font.FontSize = 9; cellEnd.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin; cellEnd.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center; } catch { }
                                                                     }
                                                                 }
                                                                 catch (IndexOutOfRangeException) { }
@@ -1506,6 +1960,161 @@ namespace denemelikimid
                                             }
                                         }
                                     }
+                                }
+
+                                // Banka Listesi Population Logic
+                                try
+                                {
+                                    var wsBanka = workbook.Worksheets.FirstOrDefault(w => w.Name.Replace(" ", "").ToUpperInvariant().Contains("BANKA"));
+                                    if (wsBanka != null)
+                                    {
+                                        int bAdCol = -1, bSoyadCol = -1, bTcCol = -1, bIbanCol = -1, bTutarCol = -1, bSiraCol = -1;
+                                        int bankaHeaderRow = -1;
+
+                                        for (int r = 1; r <= 15; r++)
+                                        {
+                                            for (int c = 1; c <= 20; c++)
+                                            {
+                                                var hv = wsBanka.Cell(r, c).GetString()?.Trim()?.ToUpperInvariant() ?? "";
+                                                if (string.IsNullOrWhiteSpace(hv)) continue;
+
+                                                string normal = hv.Replace("İ", "I").Replace("Ş", "S").Replace("Ğ", "G").Replace("Ü", "U").Replace("Ö", "O").Replace("Ç", "C");
+                                                string clean = normal.Replace(" ", "");
+
+                                                if (clean == "SIRA" || clean == "SIRANO") { bSiraCol = c; bankaHeaderRow = r; }
+                                                else if (clean == "TC" || clean == "TCKIMLIK" || clean == "TCKIMLIKNO" || clean == "TCNO" || clean.StartsWith("TCKIM")) { bTcCol = c; bankaHeaderRow = r; }
+                                                else if (clean.Contains("IBAN") || clean.Contains("HESAP")) { bIbanCol = c; bankaHeaderRow = r; }
+                                                else if (clean == "TUTAR" || clean == "MAAS" || clean == "UCRET" || clean == "ODEME" || clean == "NET" || clean == "NETODEME" || clean == "NETMAAS") { bTutarCol = c; bankaHeaderRow = r; }
+                                                else if (clean == "ADSOYAD" || clean == "ADISOYADI" || clean == "PERSONELADISOYADI" || clean == "ADVEYASOYAD") { bAdCol = c; bSoyadCol = c; bankaHeaderRow = r; }
+                                                else if (clean == "AD" || clean == "ADI" || clean == "PERSONELADI") { bAdCol = c; bankaHeaderRow = r; }
+                                                else if (clean == "SOYAD" || clean == "SOYADI" || clean == "PERSONELSOYADI") { bSoyadCol = c; bankaHeaderRow = r; }
+
+                                            }
+                                        }
+
+                                        if (bankaHeaderRow > 0)
+                                        {
+                                            int bWriteRow = bankaHeaderRow + 1;
+                                            int bSiraNo = 1;
+
+                                            var validTcs = new HashSet<string>();
+                                            var bankaGrids = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText)
+                                                             ? kampusGrids.Where(k => k.Key == seciliKampusText).Select(k => k.Value)
+                                                             : kampusGrids.Values;
+
+                                            foreach (var grid in bankaGrids)
+                                            {
+                                                foreach (DataGridViewRow row in grid.Rows)
+                                                {
+                                                    string tmptc = row.Cells[0].Value?.ToString();
+                                                    if (!string.IsNullOrEmpty(tmptc)) validTcs.Add(tmptc);
+                                                }
+                                            }
+
+                                            using (var connBanka = NotDbConnection.GetConnection())
+                                            {
+                                                var kampusSirasi = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText)
+                                                    ? new[] { seciliKampusText }
+                                                    : kampusGrids.Keys.ToArray();
+
+                                                foreach (var kampus in kampusSirasi)
+                                                {
+                                                    string bSql = @"SELECT 
+                                                                    p.p_tc, 
+                                                                    COALESCE(MAX(NULLIF(p.p_ad_soyad, '')), NULLIF(MAX(pk.pk_ad_soyad), ''), '') AS p_ad_soyad,
+                                                                    COALESCE(MAX(NULLIF(p.p_ad, '')), NULLIF(MAX(pk.pk_ad), ''), '') AS p_ad,
+                                                                    COALESCE(MAX(NULLIF(p.p_soyad, '')), NULLIF(MAX(pk.pk_soyad), ''), '') AS p_soyad,
+                                                                    COALESCE(MAX(NULLIF(p.p_iban, '')), NULLIF(MAX(pk.pk_iban_no), ''), '') AS p_iban,
+                                                                    COALESCE(MAX(p.p_calistigi_gun_sayisi), 0) AS p_calistigi_gun_sayisi,
+                                                                    MAX(b.b_odenmesi_gereken_net_tutar) AS hesaplanan_maas
+                                                                FROM puantaj p
+                                                                LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
+                                                                LEFT JOIN bordro b ON b.b_tc = p.p_tc AND b.b_yil_ay = p.p_yil_ay
+                                                                WHERE p.p_yil_ay = @donem AND p.p_calistigi_gun_sayisi > 0
+                                                                  AND COALESCE(NULLIF(TRIM(pk.pk_gorev_yeri), ''), 'Kampüs1') = @kampus
+                                                                GROUP BY p.p_tc
+                                                                ORDER BY p_ad, p_ad_soyad, p_tc";
+
+                                                    using (var bCmd = new MySqlCommand(bSql, connBanka))
+                                                    {
+                                                        bCmd.Parameters.AddWithValue("@donem", $"{donemYear:D4}-{donemMonth:D2}");
+                                                        bCmd.Parameters.AddWithValue("@kampus", kampus);
+                                                        using (var bDr = bCmd.ExecuteReader())
+                                                        {
+                                                            while (bDr.Read())
+                                                            {
+                                                                string bTc = bDr["p_tc"]?.ToString() ?? "";
+                                                                if (validTcs.Count > 0 && !validTcs.Contains(bTc)) continue;
+
+                                                                string bIban = bDr["p_iban"]?.ToString() ?? "";
+                                                                string bAd = bDr["p_ad"]?.ToString() ?? "";
+                                                                string bSoyad = bDr["p_soyad"]?.ToString() ?? "";
+
+                                                                if (string.IsNullOrEmpty(bAd))
+                                                                {
+                                                                    string bAdSoyad = bDr["p_ad_soyad"]?.ToString() ?? "";
+                                                                    var pars = bAdSoyad.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                                                    if (pars.Length > 0) bAd = pars[0];
+                                                                    if (pars.Length > 1) bSoyad = string.Join(" ", pars.Skip(1));
+                                                                }
+
+                                                                int bGun = Convert.ToInt32(bDr["p_calistigi_gun_sayisi"]);
+                                                                float bTutar;
+                                                                if (bDr["hesaplanan_maas"] != DBNull.Value)
+                                                                {
+                                                                    bTutar = Convert.ToSingle(bDr["hesaplanan_maas"]);
+                                                                }
+                                                                else
+                                                                {
+                                                                    bTutar = bGun * 1375.0f; // Eğer bordro hesaplanmamışsa varsayılan ücret çarpanı
+                                                                }
+
+                                                                if (bSiraCol > 0) wsBanka.Cell(bWriteRow, bSiraCol).Value = bSiraNo;
+                                                                if (bTcCol > 0) wsBanka.Cell(bWriteRow, bTcCol).Value = bTc;
+                                                                if (bIbanCol > 0) wsBanka.Cell(bWriteRow, bIbanCol).Value = bIban;
+
+                                                                if (bAdCol > 0 && bSoyadCol > 0 && bAdCol == bSoyadCol)
+                                                                {
+                                                                    wsBanka.Cell(bWriteRow, bAdCol).Value = (bAd + " " + bSoyad).Trim();
+                                                                }
+                                                                else
+                                                                {
+                                                                    if (bAdCol > 0) wsBanka.Cell(bWriteRow, bAdCol).Value = bAd;
+                                                                    if (bSoyadCol > 0) wsBanka.Cell(bWriteRow, bSoyadCol).Value = bSoyad;
+                                                                }
+
+                                                                if (bTutarCol > 0) wsBanka.Cell(bWriteRow, bTutarCol).Value = bTutar;
+
+                                                                var cols = new[] { bSiraCol, bTcCol, bIbanCol, bAdCol, bSoyadCol, bTutarCol };
+                                                                foreach (var c in cols.Where(x => x > 0).Distinct())
+                                                                {
+                                                                    try
+                                                                    {
+                                                                        var cCell = wsBanka.Cell(bWriteRow, c);
+                                                                        cCell.Style.Font.FontName = "Segoe UI";
+                                                                        cCell.Style.Font.FontSize = 9;
+                                                                        cCell.Style.Border.TopBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+                                                                        cCell.Style.Border.BottomBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+                                                                        cCell.Style.Border.LeftBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+                                                                        cCell.Style.Border.RightBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+                                                                        if (c == bTutarCol) cCell.Style.NumberFormat.Format = "#,##0.00 ₺";
+                                                                    }
+                                                                    catch { }
+                                                                }
+
+                                                                bWriteRow++;
+                                                                bSiraNo++;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception bankaEx)
+                                {
+                                    try { SimpleLogger.Log("Banka listesi doldurulurken hata: " + bankaEx.Message); } catch { }
                                 }
 
                                 // Save to temporary file first to avoid leaving partial file if target is locked

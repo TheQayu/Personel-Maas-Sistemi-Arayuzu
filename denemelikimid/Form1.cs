@@ -5,6 +5,7 @@ using System.Data;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
+using System.IO;
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
 
@@ -13,6 +14,9 @@ namespace denemelikimid
     public partial class Form1 : Form
     {
         private DateTime secilenTarih = DateTime.Now;
+        private const string LogoPath = @"C:\Users\mehme\source\repos\Personel-Maas-Sistemi-Arayuzu\denemelikimid\logo.png";
+        private Icon appIcon;
+        private Image logoSource;
 
         // Renkler
         private Color colorPrimary = Color.FromArgb(67, 97, 238);
@@ -57,6 +61,20 @@ namespace denemelikimid
             this.AutoScaleDimensions = new SizeF(96F, 96F);
             this.MinimumSize = new Size(1000, 600);
             this.BackColor = colorContent;
+
+            if (File.Exists(LogoPath))
+            {
+                using (var bmp = new Bitmap(LogoPath))
+                {
+                    appIcon = Icon.FromHandle(bmp.GetHicon());
+                    this.Icon = appIcon;
+                }
+
+                if (logoSource == null)
+                {
+                    logoSource = LoadImageCopy(LogoPath);
+                }
+            }
         }
 
         private void InitializeUI()
@@ -85,9 +103,9 @@ namespace denemelikimid
             // Logo Bölümü
             panelLogo = new Panel();
             panelLogo.Dock = DockStyle.Top;
-            panelLogo.Height = 120;
+            panelLogo.Height = 170;
             panelLogo.BackColor = colorPrimary;
-            panelLogo.Padding = new Padding(20, 20, 20, 20);
+            panelLogo.Padding = new Padding(10);
             panelSidebar.Controls.Add(panelLogo);
 
             lblLogo = new Label();
@@ -98,6 +116,26 @@ namespace denemelikimid
             lblLogo.Dock = DockStyle.Fill;
             lblLogo.AutoSize = false;
             panelLogo.Controls.Add(lblLogo);
+
+            if (File.Exists(LogoPath))
+            {
+                var logoBox = new PictureBox
+                {
+                    Size = new Size(130, 130),
+                    SizeMode = PictureBoxSizeMode.CenterImage,
+                    BackColor = Color.Transparent
+                };
+                panelLogo.Resize += (s, e) =>
+                {
+                    CenterLogo(logoBox);
+                    UpdateLogoImage(logoBox);
+                };
+                panelLogo.Controls.Add(logoBox);
+                logoBox.BringToFront();
+                CenterLogo(logoBox);
+                UpdateLogoImage(logoBox);
+                lblLogo.Visible = false;
+            }
 
             // Menü Butonları Container
             Panel panelMenu = new Panel();
@@ -112,7 +150,7 @@ namespace denemelikimid
             AddMenuButton(panelMenu, "📝 Puantaj Girişi", "Puantaj");
             AddMenuButton(panelMenu, "📊 Raporlar & Bordro", "Raporlar");
             AddMenuButton(panelMenu, "📄 Excel İşlemleri", "Excel");
-            AddMenuButton(panelMenu, "⚙️ Ayarlar", "Ayarlar");
+            AddMenuButton(panelMenu, "⚙️ Hakkında", "Hakkında");
 
             // Alt Kısım - Kullanıcı Bilgisi
             Panel panelUser = new Panel();
@@ -123,7 +161,7 @@ namespace denemelikimid
             panelSidebar.Controls.Add(panelUser);
 
             lblUser = new Label();
-            lblUser.Text = "👤 Admin Kullanıcı";
+            lblUser.Text = "Bursa Uludağ Üniversitesi";
             lblUser.ForeColor = Color.White;
             lblUser.Font = new Font("Segoe UI", 10, FontStyle.Regular);
             lblUser.Dock = DockStyle.Fill;
@@ -253,7 +291,7 @@ namespace denemelikimid
             btnLogout.BackColor = colorDanger;
             btnLogout.ForeColor = Color.White;
             btnLogout.FlatStyle = FlatStyle.Flat;
-            btnLogout.FlatAppearance.BorderSize = 0;
+            btnLogout.FlatAppearance.BorderSize = 1;
             btnLogout.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             btnLogout.Cursor = Cursors.Hand;
             btnLogout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -266,6 +304,20 @@ namespace denemelikimid
             btnLogout.MouseLeave += (s, e) =>
             {
                 btnLogout.BackColor = colorDanger;
+            };
+
+            btnLogout.Click += (s, e) =>
+            {
+                var result = MessageBox.Show(
+                    "Kaydetmediğiniz değişiklikler olabilir. Çıkış yapmak istediğinize emin misiniz?",
+                    "Çıkış Onayı",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (result == DialogResult.Yes)
+                {
+                    this.Close();
+                }
             };
 
             ApplyRoundedCorners(btnLogout, 12);
@@ -290,6 +342,8 @@ namespace denemelikimid
         {
             panelContent.Controls.Clear();
 
+            lblSubtitle.Visible = string.Equals(viewName, "Dashboard", StringComparison.OrdinalIgnoreCase);
+
             switch (viewName)
             {
                 case "Dashboard":
@@ -304,7 +358,7 @@ namespace denemelikimid
                 case "Excel":
                     LoadExcelView();
                     break;
-                case "Ayarlar":
+                case "Hakkında":
                     LoadAyarlarView();
                     break;
                 case "Raporlar":
@@ -407,6 +461,56 @@ namespace denemelikimid
             };
         }
 
+        private static void CenterLogo(PictureBox logoBox)
+        {
+            if (logoBox?.Parent == null) return;
+            int x = (logoBox.Parent.Width - logoBox.Width) / 2;
+            int y = (logoBox.Parent.Height - logoBox.Height) / 2;
+            logoBox.Location = new Point(Math.Max(0, x), Math.Max(0, y));
+        }
+
+        private static Image LoadImageCopy(string path)
+        {
+            using (var img = Image.FromFile(path))
+            {
+                return new Bitmap(img);
+            }
+        }
+
+        private static Image CreateCircularImage(Image source, int diameter)
+        {
+            if (source == null || diameter <= 0) return null;
+            var dest = new Bitmap(diameter, diameter);
+            dest.SetResolution(source.HorizontalResolution, source.VerticalResolution);
+            using (var g = Graphics.FromImage(dest))
+            using (var path = new GraphicsPath())
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                path.AddEllipse(0, 0, diameter - 1, diameter - 1);
+                g.SetClip(path);
+                g.DrawImage(source, new Rectangle(0, 0, diameter, diameter));
+            }
+            return dest;
+        }
+
+        private void UpdateLogoImage(PictureBox logoBox)
+        {
+            if (logoBox == null || logoSource == null) return;
+            int size = Math.Min(logoBox.Width, logoBox.Height);
+            if (size <= 0) return;
+
+            var oldImage = logoBox.Image;
+            logoBox.Image = CreateCircularImage(logoSource, size);
+            if (oldImage != null && !ReferenceEquals(oldImage, logoSource))
+            {
+                oldImage.Dispose();
+            }
+        }
+
         private void InitializeComponent()
         {
             this.SuspendLayout();
@@ -415,7 +519,13 @@ namespace denemelikimid
             // 
             this.ClientSize = new System.Drawing.Size(284, 261);
             this.Name = "Form1";
+            this.Load += new System.EventHandler(this.Form1_Load);
             this.ResumeLayout(false);
+
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
 
         }
     }

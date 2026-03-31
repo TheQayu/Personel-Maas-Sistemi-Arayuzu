@@ -146,7 +146,7 @@ namespace denemelikimid
             {
                 try
                 {
-                    float gunlukUcret = 500.0f;
+                    float gunlukUcret = 1375.00f;
 
                     using (var conn =
                            new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
@@ -236,6 +236,27 @@ namespace denemelikimid
             panelContainer.Controls.Add(lblInfo);
         }
 
+        private bool IsExcelHeaderLike(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            string normalized = text.Trim().ToUpperInvariant()
+                .Replace("İ", "I")
+                .Replace("Ğ", "G")
+                .Replace("Ü", "U")
+                .Replace("Ş", "S")
+                .Replace("Ö", "O")
+                .Replace("Ç", "C");
+
+            return normalized == "SIRA"
+                   || normalized == "KATILIMCI"
+                   || normalized == "KATILIMCI BILGILERI"
+                   || normalized == "BILGILERI"
+                   || normalized == "IBAN"
+                   || normalized == "TC"
+                   || normalized == "AD SOYAD";
+        }
+
         /// <summary>
         /// BUÜ formatındaki Excel dosyasını import eder (Bordro ve Puantaj bilgilerini içerir)
         /// </summary>
@@ -286,10 +307,41 @@ namespace denemelikimid
 
                     string CleanDigits(string s) => new string((s ?? "").Where(char.IsDigit).ToArray());
                     bool HasLetter(string s) => !string.IsNullOrWhiteSpace(s) && s.Any(char.IsLetter);
+                    bool IsLikelyTc(string s) => !string.IsNullOrWhiteSpace(s) && s.Length == 11 && s.All(char.IsDigit) && s[0] != '0';
+                    bool IsNameNoise(string text)
+                    {
+                        if (string.IsNullOrWhiteSpace(text)) return true;
+                        string t = NormalizeHeader(text);
+                        return IsExcelHeaderLike(t)
+                               || t.Contains("KAMPUS")
+                               || t == "GUVENLIK" || t == "TEMIZLIK" || t == "IDARI" || t == "BILISIM" || t == "TEKNIK" || t == "AKADEMIK"
+                               || t == "OCAK" || t == "SUBAT" || t == "MART" || t == "NISAN" || t == "MAYIS" || t == "HAZIRAN"
+                               || t == "TEMMUZ" || t == "AGUSTOS" || t == "EYLUL" || t == "EKIM" || t == "KASIM" || t == "ARALIK"
+                               || t == "X" || t == "I" || t == "R";
+                    }
+
+                    string ReadTcFromCell(IXLCell cell)
+                    {
+                        string raw = cell.GetValue<string>()?.Trim() ?? "";
+                        string digits = CleanDigits(raw);
+                        if (digits.Length == 11) return digits;
+
+                        try
+                        {
+                            if (cell.DataType == XLDataType.Number)
+                            {
+                                string n = Convert.ToInt64(Math.Round(cell.GetDouble())).ToString();
+                                if (n.Length == 11) return n;
+                            }
+                        }
+                        catch { }
+
+                        return digits;
+                    }
 
                     // 1) Önce başlıklardan kolonları bulmaya çalış
                     int headerRow = -1;
-                    int tcCol = -1, adSoyadCol = -1, adCol = -1, soyadCol = -1, ibanCol = -1, gunCol = -1;
+                    int tcCol = -1, adSoyadCol = -1, adCol = -1, soyadCol = -1, ibanCol = -1, gunCol = -1, iseGirisCol = -1;
 
                     for (int row = firstRow; row <= Math.Min(lastRow, firstRow + 25); row++)
                     {
@@ -307,16 +359,17 @@ namespace denemelikimid
                             {
                                 if (adSoyadCol == -1) adSoyadCol = col;
                             }
-                            else if (h == "AD" || h.Contains("ADI") || h.Contains("KATILIMCI"))
+                            else if (h == "AD" || h == "ADI")
                             {
                                 if (adCol == -1) adCol = col;
                             }
-                            else if (h.Contains("SOYAD") || h.Contains("BILGILERI") || h.Contains("BILGILERI"))
+                            else if (h == "SOYAD" || h == "SOYADI")
                             {
                                 if (soyadCol == -1) soyadCol = col;
                             }
                             if (h.Contains("IBAN") && ibanCol == -1) ibanCol = col;
                             if ((h.Contains("GUN") || h.Contains("CALISTIGI GUN")) && gunCol == -1) gunCol = col;
+                            if ((h.Contains("ISE GIRIS") || h.Contains("İŞE GİRİŞ") || h.Contains("BASLAMA TARIHI") || h.Contains("BAŞLAMA TARİHİ")) && iseGirisCol == -1) iseGirisCol = col;
                         }
                     }
 
@@ -346,22 +399,10 @@ namespace denemelikimid
                     if (tcCol == -1)
                         throw new Exception("TC kolonu tespit edilemedi.");
 
-                    // 3) Yardımcı kolon tahminleri
-                    if (adSoyadCol == -1)
+                    // 3) Yardımcı kolon tahminleri (Sadece adSoyadCol eksikse, adCol/soyadCol varsa kullanacağız, rastgele ezme yok.)
+                    if (adSoyadCol == -1 && adCol > 0 && soyadCol > 0)
                     {
-                        if (adCol > 0 && soyadCol > 0)
-                        {
-                            // ayrı alanlardan birleştirilecek
-                        }
-                        else if (tcCol - 2 >= firstCol)
-                        {
-                            adCol = tcCol - 2;
-                            soyadCol = tcCol - 1;
-                        }
-                        else if (tcCol - 1 >= firstCol)
-                        {
-                            adSoyadCol = tcCol - 1;
-                        }
+                        // ayrı alanlardan birleştirilecek, bu yüzden adSoyadCol'a dokunmuyoruz.
                     }
 
                     if (ibanCol == -1)
@@ -421,38 +462,97 @@ namespace denemelikimid
                         
                         int importedCount = 0;
                         int skippedCount = 0;
+                        var gorulenTcListesi = new HashSet<string>();
 
                         // Veri satırlarını işle
                         for (int row = firstRow; row <= lastRow; row++)
                         {
                             try
                             {
-                                string tcRaw = worksheet.Cell(row, tcCol).GetValue<string>()?.Trim() ?? "";
-                                string tc = new string(tcRaw.Where(char.IsDigit).ToArray());
-                                string adSoyad = "";
-                                string adHucre = adCol > 0 ? (worksheet.Cell(row, adCol).GetValue<string>()?.Trim() ?? "") : "";
-                                string soyadHucre = soyadCol > 0 ? (worksheet.Cell(row, soyadCol).GetValue<string>()?.Trim() ?? "") : "";
+                                string tc = ReadTcFromCell(worksheet.Cell(row, tcCol));
+                                if (IsLikelyTc(tc))
+                                    gorulenTcListesi.Add(tc);
 
-                                if (!string.IsNullOrWhiteSpace(adHucre) && !string.IsNullOrWhiteSpace(soyadHucre))
+                                // Öncelik 1: Ayrı Ad ve Soyad kolonları tespit edilmişse ve hücreleri doluysa
+                                string secilenAd = adCol > 0 ? (worksheet.Cell(row, adCol).GetValue<string>()?.Trim() ?? "") : "";
+                                string secilenSoyad = soyadCol > 0 ? (worksheet.Cell(row, soyadCol).GetValue<string>()?.Trim() ?? "") : "";
+                                string secilenAdSoyadBirlikte = adSoyadCol > 0 ? (worksheet.Cell(row, adSoyadCol).GetValue<string>()?.Trim() ?? "") : "";
+
+                                string firstName = "";
+                                string lastName = "";
+                                bool basariliBulundu = false;
+
+                                if (HasLetter(secilenAd) && HasLetter(secilenSoyad))
                                 {
-                                    adSoyad = (adHucre + " " + soyadHucre).Trim();
+                                    firstName = secilenAd;
+                                    lastName = secilenSoyad;
+                                    basariliBulundu = true;
                                 }
 
-                                // Ad/Soyad yanlış kolondan (ör. SIRA) geldiyse satırdaki metin alanlarından toparla
-                                if (!HasLetter(adSoyad))
+                                // Öncelik 2: Başlık yanlış yakalansa bile TC'nin solundaki iki hücreyi dene
+                                if (!basariliBulundu)
+                                {
+                                    string adNearTc = tcCol - 2 >= firstCol ? (worksheet.Cell(row, tcCol - 2).GetValue<string>() ?? "").Trim() : "";
+                                    string soyadNearTc = tcCol - 1 >= firstCol ? (worksheet.Cell(row, tcCol - 1).GetValue<string>() ?? "").Trim() : "";
+
+                                    if (HasLetter(adNearTc) && HasLetter(soyadNearTc) && !IsNameNoise(adNearTc) && !IsNameNoise(soyadNearTc))
+                                    {
+                                        firstName = adNearTc;
+                                        lastName = soyadNearTc;
+                                        basariliBulundu = true;
+                                    }
+                                }
+
+                                // Öncelik 3: Ad Soyad birleşik kolon tespit edilmişse
+                                if (!basariliBulundu && HasLetter(secilenAdSoyadBirlikte))
+                                {
+                                    // BUÜ şablonunda AD SOYAD kolonunun hemen sağında gerçek soyad olabiliyor.
+                                    string soyadSagHucre = "";
+                                    if (adSoyadCol > 0 && adSoyadCol + 1 <= lastCol)
+                                    {
+                                        int rightCol = adSoyadCol + 1;
+                                        if (rightCol != tcCol && rightCol != ibanCol && rightCol != gunCol && !dayColumnMap.Values.Contains(rightCol))
+                                        {
+                                            soyadSagHucre = (worksheet.Cell(row, rightCol).GetValue<string>() ?? "").Trim();
+                                        }
+                                    }
+
+                                    bool rightIsIban = soyadSagHucre.Replace(" ", "").ToUpperInvariant().StartsWith("TR")
+                                                       && soyadSagHucre.Replace(" ", "").Length >= 26;
+                                    if (HasLetter(soyadSagHucre) && !IsNameNoise(soyadSagHucre) && !rightIsIban && !IsLikelyTc(CleanDigits(soyadSagHucre)))
+                                    {
+                                        firstName = secilenAdSoyadBirlikte;
+                                        lastName = soyadSagHucre;
+                                    }
+                                    else
+                                    {
+                                        var parcalar = secilenAdSoyadBirlikte.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                        if (parcalar.Length == 1)
+                                        {
+                                            firstName = parcalar[0];
+                                        }
+                                        else if (parcalar.Length > 1)
+                                        {
+                                            lastName = parcalar[parcalar.Length - 1];
+                                            firstName = string.Join(" ", parcalar.Take(parcalar.Length - 1));
+                                        }
+                                    }
+                                    basariliBulundu = true;
+                                }
+
+                                // Öncelik 4: Kolonlardan bulamadıysak metin hücrelerini analiz et (Fallback)
+                                if (!basariliBulundu)
                                 {
                                     var metinHucreleri = new List<string>();
                                     for (int c = firstCol; c <= lastCol; c++)
                                     {
-                                        if (c == tcCol || c == ibanCol) continue;
+                                        if (c == tcCol || c == ibanCol || c == gunCol || c == adCol || c == soyadCol || c == adSoyadCol) continue;
                                         if (dayColumnMap.Values.Contains(c)) continue;
 
                                         string v = (worksheet.Cell(row, c).GetValue<string>() ?? "").Trim();
                                         if (string.IsNullOrWhiteSpace(v)) continue;
 
-                                        string vUpper = v.ToUpperInvariant();
-                                        if (vUpper.Contains("SIRA") || vUpper.Contains("KATILIMCI") || vUpper.Contains("BILGI") || vUpper.Contains("IBAN") || vUpper.Contains("TC"))
-                                            continue;
+                                        if (IsNameNoise(v)) continue;
 
                                         if (v.All(char.IsDigit)) continue;
                                         if (v.Replace(" ", "").ToUpperInvariant().StartsWith("TR") && v.Replace(" ", "").Length >= 26) continue;
@@ -462,19 +562,23 @@ namespace denemelikimid
                                             metinHucreleri.Add(v);
                                     }
 
-                                    if (metinHucreleri.Count >= 2)
-                                        adSoyad = (metinHucreleri[0] + " " + metinHucreleri[1]).Trim();
-                                    else if (metinHucreleri.Count == 1)
-                                        adSoyad = metinHucreleri[0].Trim();
+                                    if (metinHucreleri.Count > 0)
+                                    {
+                                        string adSoyadMetin = string.Join(" ", metinHucreleri).Trim();
+                                        var np = adSoyadMetin.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                        if (np.Length == 1)
+                                        {
+                                            firstName = np[0];
+                                        }
+                                        else if (np.Length > 1)
+                                        {
+                                            lastName = np[np.Length - 1];
+                                            firstName = string.Join(" ", np.Take(np.Length - 1));
+                                        }
+                                    }
                                 }
-                                else if (adSoyadCol > 0)
-                                {
-                                    adSoyad = worksheet.Cell(row, adSoyadCol).GetValue<string>()?.Trim() ?? "";
-                                }
-                                else
-                                {
-                                    adSoyad = (adHucre + " " + soyadHucre).Trim();
-                                }
+
+                                string adSoyad = (firstName + " " + lastName).Trim();
 
                                 string iban = ibanCol > 0 ? (worksheet.Cell(row, ibanCol).GetValue<string>()?.Trim() ?? "") : "";
                                 
@@ -488,6 +592,16 @@ namespace denemelikimid
                                         gunValue = worksheet.Cell(row, gunCol).GetValue<double>().ToString();
                                     }
                                     int.TryParse(gunValue, out gunSayisi);
+                                }
+
+                                DateTime? iseGirisTarihi = null;
+                                if (iseGirisCol > 0)
+                                {
+                                    var dateCell = worksheet.Cell(row, iseGirisCol);
+                                    if (dateCell.TryGetValue(out DateTime d))
+                                    {
+                                        iseGirisTarihi = d;
+                                    }
                                 }
 
                                 // Gün detaylarını (X/İ/R) al
@@ -533,13 +647,8 @@ namespace denemelikimid
 
                                 // Geçersiz/başlık satırlarını atla
                                 string adSoyadUpper = (adSoyad ?? "").ToUpperInvariant();
-                                if (!InputValidator.IsValidTCNumber(tc) ||
-                                    adSoyadUpper.Contains("AD SOYAD") ||
-                                    adSoyadUpper.Contains("KATILIMCI") ||
-                                    adSoyadUpper.Contains("BİLGİ") ||
-                                    adSoyadUpper.Contains("BILGI") ||
-                                    adSoyadUpper.Contains("SIRA") ||
-                                    adSoyadUpper.Contains("IBAN") ||
+                                if (!IsLikelyTc(tc) ||
+                                    IsExcelHeaderLike(adSoyadUpper) ||
                                     !HasLetter(adSoyad))
                                 {
                                     skippedCount++;
@@ -548,66 +657,65 @@ namespace denemelikimid
 
                                 // Puantaj tablosuna ekle/güncelle
                                 string queryPuantaj = @"INSERT INTO puantaj 
-                                    (p_tc, p_ad_soyad, p_ad, p_soyad, p_iban, p_calistigi_gun_sayisi, p_ise_baslama_tarihi) 
-                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @gun, CURDATE())
+                                    (p_tc, p_ad_soyad, p_ad, p_soyad, p_iban, p_gun_detaylari, p_calistigi_gun_sayisi, p_ise_baslama_tarihi) 
+                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @detay, @gun, COALESCE(@iseGiris, CURDATE()))
                                     ON DUPLICATE KEY UPDATE 
                                     p_ad_soyad = @adsoy, 
                                     p_ad = @ad, 
                                     p_soyad = @soy, 
                                     p_iban = @iban, 
-                                    p_calistigi_gun_sayisi = @gun";
+                                    p_gun_detaylari = @detay,
+                                    p_calistigi_gun_sayisi = @gun,
+                                    p_ise_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, p_ise_baslama_tarihi)";
 
-                                // isim/soyisim: son kelime soyisim, geri kalanı ad
-                                string firstName = "";
-                                string lastName = "";
-                                if (!string.IsNullOrWhiteSpace(adSoyad))
+                                using (var rowTx = conn.BeginTransaction())
                                 {
-                                    var np = adSoyad.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                                    if (np.Length == 1)
+                                    try
                                     {
-                                        firstName = np[0];
+                                        using (var cmd = new MySqlCommand(queryPuantaj, conn, rowTx))
+                                        {
+                                            cmd.Parameters.AddWithValue("@tc", tc);
+                                            cmd.Parameters.AddWithValue("@adsoy", adSoyad);
+                                            cmd.Parameters.AddWithValue("@ad", firstName);
+                                            cmd.Parameters.AddWithValue("@soy", lastName);
+                                            cmd.Parameters.AddWithValue("@iban", iban);
+                                            cmd.Parameters.AddWithValue("@detay", (object)gunDetaylari ?? DBNull.Value);
+                                            cmd.Parameters.AddWithValue("@gun", gunSayisi);
+                                            cmd.Parameters.AddWithValue("@iseGiris", (object)iseGirisTarihi ?? DBNull.Value);
+                                            cmd.ExecuteNonQuery();
+                                        }
+
+                                        // Program katılımcıları tablosuna ekle/güncelle (kampüs bilgisiyle)
+                                        string queryKatilimci = @"INSERT INTO program_katilimcilari 
+                                            (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi) 
+                                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, COALESCE(@iseGiris, CURDATE()))
+                                            ON DUPLICATE KEY UPDATE 
+                                            pk_ad_soyad = @adsoy, 
+                                            pk_ad = @ad, 
+                                            pk_soyad = @soy, 
+                                            pk_iban_no = @iban, 
+                                            pk_gorev_yeri = @kampus,
+                                            pk_is_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, pk_is_baslama_tarihi)";
+
+                                        using (var cmd = new MySqlCommand(queryKatilimci, conn, rowTx))
+                                        {
+                                            cmd.Parameters.AddWithValue("@tc", tc);
+                                            cmd.Parameters.AddWithValue("@adsoy", adSoyad);
+                                            cmd.Parameters.AddWithValue("@ad", firstName);
+                                            cmd.Parameters.AddWithValue("@soy", lastName);
+                                            cmd.Parameters.AddWithValue("@iban", iban);
+                                            cmd.Parameters.AddWithValue("@kampus", kampus);
+                                            cmd.Parameters.AddWithValue("@iseGiris", (object)iseGirisTarihi ?? DBNull.Value);
+                                            cmd.ExecuteNonQuery();
+                                        }
+
+                                        rowTx.Commit();
                                     }
-                                    else if (np.Length > 1)
+                                    catch
                                     {
-                                        lastName = np[np.Length - 1];
-                                        firstName = string.Join(" ", np.Take(np.Length - 1));
+                                        rowTx.Rollback();
+                                        throw;
                                     }
-                                }
-
-                                adSoyad = (firstName + " " + lastName).Trim();
-
-                                using (var cmd = new MySqlCommand(queryPuantaj, conn))
-                                {
-                                    cmd.Parameters.AddWithValue("@tc", tc);
-                                    cmd.Parameters.AddWithValue("@adsoy", adSoyad);
-                                    cmd.Parameters.AddWithValue("@ad", firstName);
-                                    cmd.Parameters.AddWithValue("@soy", lastName);
-                                    cmd.Parameters.AddWithValue("@iban", iban);
-                                    cmd.Parameters.AddWithValue("@detay", (object)gunDetaylari ?? DBNull.Value);
-                                    cmd.Parameters.AddWithValue("@gun", gunSayisi);
-                                    cmd.ExecuteNonQuery();
-                                }
-
-                                // Program katılımcıları tablosuna ekle/güncelle (kampüs bilgisiyle)
-                                string queryKatilimci = @"INSERT INTO program_katilimcilari 
-                                    (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi) 
-                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, CURDATE())
-                                    ON DUPLICATE KEY UPDATE 
-                                    pk_ad_soyad = @adsoy, 
-                                    pk_ad = @ad, 
-                                    pk_soyad = @soy, 
-                                    pk_iban_no = @iban, 
-                                    pk_gorev_yeri = @kampus";
-
-                                using (var cmd = new MySqlCommand(queryKatilimci, conn))
-                                {
-                                    cmd.Parameters.AddWithValue("@tc", tc);
-                                    cmd.Parameters.AddWithValue("@adsoy", adSoyad);
-                                    cmd.Parameters.AddWithValue("@ad", firstName);
-                                    cmd.Parameters.AddWithValue("@soy", lastName);
-                                    cmd.Parameters.AddWithValue("@iban", iban);
-                                    cmd.Parameters.AddWithValue("@kampus", kampus);
-                                    cmd.ExecuteNonQuery();
                                 }
 
                                 importedCount++;
@@ -617,6 +725,29 @@ namespace denemelikimid
                                 skippedCount++;
                                 // Hata olan satırları atla ve devam et
                                 continue;
+                            }
+                        }
+
+                        // Bu dosyada görülen tüm geçerli TC'ler için kampüs eşleşmesini zorunlu olarak düzelt
+                        foreach (var tcFix in gorulenTcListesi)
+                        {
+                            string fixKatilimciSql = @"INSERT INTO program_katilimcilari
+                                (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi)
+                                SELECT p.p_tc, p.p_ad_soyad, p.p_ad, p.p_soyad, p.p_iban, @kampus, p.p_ise_baslama_tarihi
+                                FROM puantaj p
+                                WHERE p.p_tc = @tc
+                                ON DUPLICATE KEY UPDATE
+                                pk_ad_soyad = VALUES(pk_ad_soyad),
+                                pk_ad = VALUES(pk_ad),
+                                pk_soyad = VALUES(pk_soyad),
+                                pk_iban_no = VALUES(pk_iban_no),
+                                pk_gorev_yeri = VALUES(pk_gorev_yeri)";
+
+                            using (var fixCmd = new MySqlCommand(fixKatilimciSql, conn))
+                            {
+                                fixCmd.Parameters.AddWithValue("@tc", tcFix);
+                                fixCmd.Parameters.AddWithValue("@kampus", kampus);
+                                fixCmd.ExecuteNonQuery();
                             }
                         }
 
@@ -706,28 +837,55 @@ namespace denemelikimid
             if (dt.Rows.Count == 0)
                 return (0, 0, kampus);
 
-            int tcCol = -1, adSoyadCol = -1, ibanCol = -1, gunCol = -1;
+            int tcCol = -1, adSoyadCol = -1, adCol = -1, soyadCol = -1, ibanCol = -1, gunCol = -1, iseGirisCol = -1;
             for (int i = 0; i < dt.Columns.Count; i++)
             {
                 string col = (dt.Columns[i].ColumnName ?? "").ToUpperInvariant();
                 if (tcCol == -1 && (col.Contains("TC") || col.Contains("KIMLIK") || col.Contains("KİMLİK") || col.Contains("T.C"))) tcCol = i;
-                else if (adSoyadCol == -1 && col.Contains("AD") && col.Contains("SOYAD")) adSoyadCol = i;
+                else if (adSoyadCol == -1 && ((col.Contains("AD") && col.Contains("SOYAD")) || col.Contains("ADSOYAD") || col.Contains("ADI SOYADI"))) adSoyadCol = i;
+                else if (adCol == -1 && (col == "AD" || col.Contains("ADI") || col.Contains("KATILIMCI"))) adCol = i;
+                else if (soyadCol == -1 && (col.Contains("SOYAD") || col.Contains("BILGILERI") || col.Contains("BİLGİLERİ"))) soyadCol = i;
                 else if (ibanCol == -1 && col.Contains("IBAN")) ibanCol = i;
                 else if (gunCol == -1 && (col.Contains("GUN") || col.Contains("GÜN"))) gunCol = i;
+                else if (iseGirisCol == -1 && (col.Contains("ISE GIRIS") || col.Contains("İŞE GİRİŞ") || col.Contains("BASLAMA TARIHI") || col.Contains("BAŞLAMA TARİHİ"))) iseGirisCol = i;
             }
 
             if (tcCol == -1) tcCol = 0;
-            if (adSoyadCol == -1) adSoyadCol = Math.Min(1, dt.Columns.Count - 1);
+            // Removed adSoyadCol default guessing to avoid blindly picking "AD" column
             if (ibanCol == -1) ibanCol = Math.Min(2, dt.Columns.Count - 1);
             if (gunCol == -1) gunCol = Math.Min(3, dt.Columns.Count - 1);
 
             int importedCount = 0;
             int skippedCount = 0;
             bool HasLetter(string s) => !string.IsNullOrWhiteSpace(s) && s.Any(char.IsLetter);
+            bool IsLikelyTc(string s) => !string.IsNullOrWhiteSpace(s) && s.Length == 11 && s.All(char.IsDigit) && s[0] != '0';
+            string NormalizeOleHeader(string s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return "";
+                return s.Trim().ToUpperInvariant()
+                    .Replace("İ", "I")
+                    .Replace("Ğ", "G")
+                    .Replace("Ü", "U")
+                    .Replace("Ş", "S")
+                    .Replace("Ö", "O")
+                    .Replace("Ç", "C");
+            }
+            bool IsNameNoise(string text)
+            {
+                if (string.IsNullOrWhiteSpace(text)) return true;
+                string t = NormalizeOleHeader(text);
+                return IsExcelHeaderLike(t)
+                       || t.Contains("KAMPUS")
+                       || t == "GUVENLIK" || t == "TEMIZLIK" || t == "IDARI" || t == "BILISIM" || t == "TEKNIK" || t == "AKADEMIK"
+                       || t == "OCAK" || t == "SUBAT" || t == "MART" || t == "NISAN" || t == "MAYIS" || t == "HAZIRAN"
+                       || t == "TEMMUZ" || t == "AGUSTOS" || t == "EYLUL" || t == "EKIM" || t == "KASIM" || t == "ARALIK"
+                       || t == "X" || t == "I" || t == "R";
+            }
 
             using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
             {
                 conn.Open();
+                var gorulenTcListesi = new HashSet<string>();
 
                 foreach (DataRow row in dt.Rows)
                 {
@@ -735,27 +893,108 @@ namespace denemelikimid
                     {
                         string tc = (row[tcCol]?.ToString() ?? "").Trim();
                         tc = new string(tc.Where(char.IsDigit).ToArray());
+                        if (IsLikelyTc(tc))
+                            gorulenTcListesi.Add(tc);
 
-                        string adSoyad = (row[adSoyadCol]?.ToString() ?? "").Trim();
                         string iban = (row[ibanCol]?.ToString() ?? "").Trim();
 
-                        if (!HasLetter(adSoyad))
+                        // Öncelik 1: Ayrı Ad ve Soyad kolonları tespit edilmişse
+                        string secilenAd = adCol > -1 ? (row[adCol]?.ToString() ?? "").Trim() : "";
+                        string secilenSoyad = soyadCol > -1 ? (row[soyadCol]?.ToString() ?? "").Trim() : "";
+                        string secilenAdSoyadBirlikte = adSoyadCol > -1 ? (row[adSoyadCol]?.ToString() ?? "").Trim() : "";
+
+                        string firstName = "";
+                        string lastName = "";
+                        bool basariliBulundu = false;
+
+                        if (HasLetter(secilenAd) && HasLetter(secilenSoyad))
+                        {
+                            firstName = secilenAd;
+                            lastName = secilenSoyad;
+                            basariliBulundu = true;
+                        }
+
+                        // Öncelik 2: Başlık yanlış yakalansa bile TC'nin solundaki iki hücreyi dene
+                        if (!basariliBulundu)
+                        {
+                            string adNearTc = tcCol - 2 >= 0 ? (row[tcCol - 2]?.ToString() ?? "").Trim() : "";
+                            string soyadNearTc = tcCol - 1 >= 0 ? (row[tcCol - 1]?.ToString() ?? "").Trim() : "";
+                            if (HasLetter(adNearTc) && HasLetter(soyadNearTc) && !IsNameNoise(adNearTc) && !IsNameNoise(soyadNearTc))
+                            {
+                                firstName = adNearTc;
+                                lastName = soyadNearTc;
+                                basariliBulundu = true;
+                            }
+                        }
+
+                        // Öncelik 3: Ad Soyad birleşik kolon tespit edilmişse
+                        if (!basariliBulundu && HasLetter(secilenAdSoyadBirlikte))
+                        {
+                            // BUÜ şablonunda AD SOYAD kolonunun hemen sağında gerçek soyad olabiliyor.
+                            string soyadSagHucre = "";
+                            if (adSoyadCol > -1 && adSoyadCol + 1 < dt.Columns.Count)
+                            {
+                                int rightCol = adSoyadCol + 1;
+                                if (rightCol != tcCol && rightCol != ibanCol && rightCol != gunCol)
+                                {
+                                    soyadSagHucre = (row[rightCol]?.ToString() ?? "").Trim();
+                                }
+                            }
+
+                            bool rightIsIban = soyadSagHucre.Replace(" ", "").ToUpperInvariant().StartsWith("TR")
+                                               && soyadSagHucre.Replace(" ", "").Length >= 26;
+                            if (HasLetter(soyadSagHucre) && !IsNameNoise(soyadSagHucre) && !rightIsIban)
+                            {
+                                firstName = secilenAdSoyadBirlikte;
+                                lastName = soyadSagHucre;
+                            }
+                            else
+                            {
+                                var parcalar = secilenAdSoyadBirlikte.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                if (parcalar.Length == 1)
+                                {
+                                    firstName = parcalar[0];
+                                }
+                                else if (parcalar.Length > 1)
+                                {
+                                    lastName = parcalar[parcalar.Length - 1];
+                                    firstName = string.Join(" ", parcalar.Take(parcalar.Length - 1));
+                                }
+                            }
+                            basariliBulundu = true;
+                        }
+
+                        // Öncelik 4: Fallback metin hücrelerini analiz et
+                        if (!basariliBulundu)
                         {
                             var metinler = new List<string>();
                             for (int c = 0; c < dt.Columns.Count; c++)
                             {
-                                if (c == tcCol || c == ibanCol || c == gunCol) continue;
+                                if (c == tcCol || c == ibanCol || c == gunCol || c == adCol || c == soyadCol || c == adSoyadCol) continue;
                                 string v = (row[c]?.ToString() ?? "").Trim();
                                 if (string.IsNullOrWhiteSpace(v)) continue;
-                                string vu = v.ToUpperInvariant();
-                                if (vu.Contains("SIRA") || vu.Contains("KATILIMCI") || vu.Contains("BILGI") || vu.Contains("IBAN") || vu.Contains("TC")) continue;
+                                if (IsNameNoise(v)) continue;
                                 if (v.All(char.IsDigit)) continue;
                                 if (HasLetter(v)) metinler.Add(v);
                             }
 
-                            if (metinler.Count >= 2) adSoyad = (metinler[0] + " " + metinler[1]).Trim();
-                            else if (metinler.Count == 1) adSoyad = metinler[0];
+                            if (metinler.Count > 0)
+                            {
+                                string adSoyadMetin = string.Join(" ", metinler).Trim();
+                                var np = adSoyadMetin.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                if (np.Length == 1)
+                                {
+                                    firstName = np[0];
+                                }
+                                else if (np.Length > 1)
+                                {
+                                    lastName = np[np.Length - 1];
+                                    firstName = string.Join(" ", np.Take(np.Length - 1));
+                                }
+                            }
                         }
+
+                        string adSoyad = (firstName + " " + lastName).Trim();
 
                         if (tc.ToUpperInvariant().Contains("TC") || adSoyad.ToUpperInvariant().Contains("AD SOYAD"))
                         {
@@ -766,11 +1005,7 @@ namespace denemelikimid
                         // Geçersiz/başlık satırlarını atla
                         string adSoyadUpper = (adSoyad ?? "").ToUpperInvariant();
                         if (!InputValidator.IsValidTCNumber(tc) ||
-                            adSoyadUpper.Contains("KATILIMCI") ||
-                            adSoyadUpper.Contains("BİLGİ") ||
-                            adSoyadUpper.Contains("BILGI") ||
-                            adSoyadUpper.Contains("SIRA") ||
-                            adSoyadUpper.Contains("IBAN") ||
+                            IsExcelHeaderLike(adSoyadUpper) ||
                             !HasLetter(adSoyad))
                         {
                             skippedCount++;
@@ -791,54 +1026,66 @@ namespace denemelikimid
                             else int.TryParse(gv.ToString(), out gunSayisi);
                         }
 
-                        string firstName = "";
-                        string lastName = "";
-                        if (!string.IsNullOrEmpty(adSoyad))
+                        DateTime? iseGirisTarihi = null;
+                        if (iseGirisCol > -1)
                         {
-                            var np = adSoyad.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                            if (np.Length == 1)
+                            var tv = row[iseGirisCol];
+                            if (tv != null && tv != DBNull.Value)
                             {
-                                firstName = np[0];
-                            }
-                            else if (np.Length > 1)
-                            {
-                                lastName = np[np.Length - 1];
-                                firstName = string.Join(" ", np.Take(np.Length - 1));
+                                if (tv is DateTime dtVal) iseGirisTarihi = dtVal;
+                                else if (DateTime.TryParse(tv.ToString(), out DateTime parsedDate)) iseGirisTarihi = parsedDate;
                             }
                         }
 
                         string queryPuantaj = @"INSERT INTO puantaj 
                             (p_tc, p_ad_soyad, p_ad, p_soyad, p_iban, p_calistigi_gun_sayisi, p_ise_baslama_tarihi) 
-                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @gun, CURDATE())
+                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @gun, COALESCE(@iseGiris, CURDATE()))
                             ON DUPLICATE KEY UPDATE 
-                            p_ad_soyad = @adsoy, p_ad = @ad, p_soyad = @soy, p_iban = @iban, p_calistigi_gun_sayisi = @gun";
+                            p_ad_soyad = @adsoy, p_ad = @ad, p_soyad = @soy, p_iban = @iban, p_calistigi_gun_sayisi = @gun,
+                            p_ise_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, p_ise_baslama_tarihi)";
 
-                        using (var cmd = new MySqlCommand(queryPuantaj, conn))
+                        using (var rowTx = conn.BeginTransaction())
                         {
-                            cmd.Parameters.AddWithValue("@tc", tc);
-                            cmd.Parameters.AddWithValue("@adsoy", adSoyad);
-                            cmd.Parameters.AddWithValue("@ad", firstName);
-                            cmd.Parameters.AddWithValue("@soy", lastName);
-                            cmd.Parameters.AddWithValue("@iban", iban);
-                            cmd.Parameters.AddWithValue("@gun", gunSayisi);
-                            cmd.ExecuteNonQuery();
-                        }
+                            try
+                            {
+                                using (var cmd = new MySqlCommand(queryPuantaj, conn, rowTx))
+                                {
+                                    cmd.Parameters.AddWithValue("@tc", tc);
+                                    cmd.Parameters.AddWithValue("@adsoy", adSoyad);
+                                    cmd.Parameters.AddWithValue("@ad", firstName);
+                                    cmd.Parameters.AddWithValue("@soy", lastName);
+                                    cmd.Parameters.AddWithValue("@iban", iban);
+                                    cmd.Parameters.AddWithValue("@gun", gunSayisi);
+                                    cmd.Parameters.AddWithValue("@iseGiris", (object)iseGirisTarihi ?? DBNull.Value);
+                                    cmd.ExecuteNonQuery();
+                                }
 
-                        string queryKatilimci = @"INSERT INTO program_katilimcilari 
-                            (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi) 
-                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, CURDATE())
-                            ON DUPLICATE KEY UPDATE 
-                            pk_ad_soyad = @adsoy, pk_ad = @ad, pk_soyad = @soy, pk_iban_no = @iban, pk_gorev_yeri = @kampus";
+                                string queryKatilimci = @"INSERT INTO program_katilimcilari 
+                                    (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi) 
+                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, COALESCE(@iseGiris, CURDATE()))
+                                    ON DUPLICATE KEY UPDATE 
+                                    pk_ad_soyad = @adsoy, pk_ad = @ad, pk_soyad = @soy, pk_iban_no = @iban, pk_gorev_yeri = @kampus,
+                                    pk_is_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, pk_is_baslama_tarihi)";
 
-                        using (var cmd = new MySqlCommand(queryKatilimci, conn))
-                        {
-                            cmd.Parameters.AddWithValue("@tc", tc);
-                            cmd.Parameters.AddWithValue("@adsoy", adSoyad);
-                            cmd.Parameters.AddWithValue("@ad", firstName);
-                            cmd.Parameters.AddWithValue("@soy", lastName);
-                            cmd.Parameters.AddWithValue("@iban", iban);
-                            cmd.Parameters.AddWithValue("@kampus", kampus);
-                            cmd.ExecuteNonQuery();
+                                using (var cmd = new MySqlCommand(queryKatilimci, conn, rowTx))
+                                {
+                                    cmd.Parameters.AddWithValue("@tc", tc);
+                                    cmd.Parameters.AddWithValue("@adsoy", adSoyad);
+                                    cmd.Parameters.AddWithValue("@ad", firstName);
+                                    cmd.Parameters.AddWithValue("@soy", lastName);
+                                    cmd.Parameters.AddWithValue("@iban", iban);
+                                    cmd.Parameters.AddWithValue("@kampus", kampus);
+                                    cmd.Parameters.AddWithValue("@iseGiris", (object)iseGirisTarihi ?? DBNull.Value);
+                                    cmd.ExecuteNonQuery();
+                                }
+
+                                rowTx.Commit();
+                            }
+                            catch
+                            {
+                                rowTx.Rollback();
+                                throw;
+                            }
                         }
 
                         importedCount++;
@@ -846,6 +1093,29 @@ namespace denemelikimid
                     catch
                     {
                         skippedCount++;
+                    }
+                }
+
+                // Bu dosyada görülen tüm geçerli TC'ler için kampüs eşleşmesini zorunlu olarak düzelt
+                foreach (var tcFix in gorulenTcListesi)
+                {
+                    string fixKatilimciSql = @"INSERT INTO program_katilimcilari
+                        (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi)
+                        SELECT p.p_tc, p.p_ad_soyad, p.p_ad, p.p_soyad, p.p_iban, @kampus, p.p_ise_baslama_tarihi
+                        FROM puantaj p
+                        WHERE p.p_tc = @tc
+                        ON DUPLICATE KEY UPDATE
+                        pk_ad_soyad = VALUES(pk_ad_soyad),
+                        pk_ad = VALUES(pk_ad),
+                        pk_soyad = VALUES(pk_soyad),
+                        pk_iban_no = VALUES(pk_iban_no),
+                        pk_gorev_yeri = VALUES(pk_gorev_yeri)";
+
+                    using (var fixCmd = new MySqlCommand(fixKatilimciSql, conn))
+                    {
+                        fixCmd.Parameters.AddWithValue("@tc", tcFix);
+                        fixCmd.Parameters.AddWithValue("@kampus", kampus);
+                        fixCmd.ExecuteNonQuery();
                     }
                 }
             }

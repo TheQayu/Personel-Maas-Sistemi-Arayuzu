@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.Linq;
+using System.IO;
 using System.Windows.Forms;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using MySql.Data.MySqlClient;
 
@@ -54,7 +56,7 @@ namespace denemelikimid
 
             // Günlük Ücret Girişi
             Panel pnlUcret = new Panel { Width = 140, Height = 60, Margin = new Padding(0, 0, 10, 0) };
-            Label lblUcret = new Label { Text = "Günlük Brüt (TL):", Location = new Point(0, 0), AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Color.Gray };
+            Label lblUcret = new Label { Text = "Günlük Net (TL):", Location = new Point(0, 0), AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Color.Gray };
             NumericUpDown numUcret = new NumericUpDown { Location = new Point(0, 25), Width = 130, Height = 35, Maximum = 10000, DecimalPlaces = 2, Value = 1375.00M, Font = new Font("Segoe UI", 11) };
             pnlUcret.Controls.Add(lblUcret); pnlUcret.Controls.Add(numUcret);
             flowTools.Controls.Add(pnlUcret);
@@ -122,37 +124,53 @@ namespace denemelikimid
             // Listeyi Veritabanından Çek ve Filtrele
             void ListeyiGuncelle()
             {
-                try
-                {
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                string secilenKampus = cmbKampusFiltre.SelectedItem?.ToString() ?? "Tümü";
+                string donem = dtpRaporDonem.Value.ToString("yyyy-MM");
+
+                Task.Run(() => FetchBordroData(secilenKampus, donem))
+                    .ContinueWith(t =>
                     {
-                        conn.Open();
-
-                        string secilenKampus = cmbKampusFiltre.SelectedItem?.ToString() ?? "Tümü";
-                        string donem = dtpRaporDonem.Value.ToString("yyyy-MM");
-
-                        string sql = @"SELECT b_tc AS 'TC', b_ad_soyad AS 'Ad Soyad', 
-                             b_gorev_yeri AS 'Kampüs',
-                             b_aylik_calisilan_gun AS 'Gün', 
-                             b_tahakkuk_toplami AS 'Brüt', 
-                             b_odenmesi_gereken_net_tutar AS 'NET MAAŞ' 
-                             FROM bordro 
-                             WHERE (@filtre = 'Tümü' OR b_gorev_yeri = @filtre)
-                               AND b_yil_ay = @donem";
-
-                        var cmd = new MySqlCommand(sql, conn);
-                        cmd.Parameters.AddWithValue("@filtre", secilenKampus);
-                        cmd.Parameters.AddWithValue("@donem", donem);
-
-                        using (var da = new MySqlDataAdapter(cmd))
+                        if (t.IsFaulted)
                         {
-                            DataTable dt = new DataTable();
-                            da.Fill(dt);
-                            dgvBordro.DataSource = dt;
+                            var ex = t.Exception?.GetBaseException() ?? t.Exception;
+                            MessageBox.Show("Veriler yüklenirken hata: " + ex?.Message);
+                            return;
                         }
+
+                        if (dgvBordro.IsDisposed)
+                        {
+                            return;
+                        }
+
+                        dgvBordro.DataSource = t.Result;
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
+            }
+
+            DataTable FetchBordroData(string secilenKampus, string donem)
+            {
+                using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                {
+                    conn.Open();
+
+                    string sql = @"SELECT b_tc AS 'TC', b_ad_soyad AS 'Ad Soyad', 
+                         b_gorev_yeri AS 'Kampüs',
+                         b_aylik_calisilan_gun AS 'Gün', 
+                         b_odenmesi_gereken_net_tutar AS 'NET MAAŞ' 
+                         FROM bordro 
+                         WHERE (@filtre = 'Tümü' OR b_gorev_yeri = @filtre)
+                           AND b_yil_ay = @donem";
+
+                    var cmd = new MySqlCommand(sql, conn);
+                    cmd.Parameters.AddWithValue("@filtre", secilenKampus);
+                    cmd.Parameters.AddWithValue("@donem", donem);
+
+                    using (var da = new MySqlDataAdapter(cmd))
+                    {
+                        DataTable dt = new DataTable();
+                        da.Fill(dt);
+                        return dt;
                     }
                 }
-                catch { }
             }
 
             // İlk açılışta listele
@@ -219,12 +237,12 @@ namespace denemelikimid
                             string kampus = row["guncel_kampus"].ToString(); // Kampüs bilgisi
 
                             // Maaş Hesabı
-                            decimal brutUcret = gun * gunlukBruk;
-                            decimal sgkPrimi = brutUcret * 0.14M;
-                            decimal damgaVergisi = brutUcret * 0.00759M;
-                            decimal gelirVergisiMatrahi = brutUcret - sgkPrimi;
-                            decimal gelirVergisi = gelirVergisiMatrahi * 0.15M;
-                            decimal netUcret = brutUcret - (sgkPrimi + damgaVergisi + gelirVergisi);
+                            decimal netUcret = gun * gunlukBruk;
+                            decimal brutUcret = netUcret;
+                            decimal sgkPrimi = 0M;
+                            decimal damgaVergisi = 0M;
+                            decimal gelirVergisiMatrahi = 0M;
+                            decimal gelirVergisi = 0M;
 
                             // Bordroya Ekle (KAMPÜS BİLGİSİYLE BERABER)
                             string sqlBordro = @"INSERT INTO bordro 
@@ -316,7 +334,26 @@ namespace denemelikimid
                     // Bordro tablosu için kampüslere göre ayrı dosyalar (BUÜ formatı)
                     if (tableName == "bordro" && dt.Columns.Contains("b_gorev_yeri"))
                     {
-                        // Kampüslere göre ayrı dosyalar oluştur (BUÜ formatı)
+                        string defaultTemplate1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resmi_Sablon.xlsx");
+                        string defaultTemplate2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resmi_Sablon.xls");
+                        string templatePath = null;
+                        if (File.Exists(defaultTemplate1)) templatePath = defaultTemplate1;
+                        else if (File.Exists(defaultTemplate2)) templatePath = defaultTemplate2;
+                        else
+                        {
+                            OpenFileDialog ofdTemplate = new OpenFileDialog()
+                            {
+                                Filter = "Excel Şablonu|*.xlsx;*.xls",
+                                Title = "Lütfen resmi şablon Excel dosyasını seçin"
+                            };
+                            if (ofdTemplate.ShowDialog() != DialogResult.OK)
+                            {
+                                MessageBox.Show("Şablon seçilmedi. İşlem iptal edildi.", "Bilgi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                return;
+                            }
+                            templatePath = ofdTemplate.FileName;
+                        }
+
                         var kampusler = dt.AsEnumerable()
                             .Select(row => row.Field<string>("b_gorev_yeri") ?? "Diğer")
                             .Where(k => !string.IsNullOrEmpty(k) && (k == "Kampüs1" || k == "Kampüs2" || k == "Kampüs3"))
@@ -328,62 +365,46 @@ namespace denemelikimid
                             kampusler.AddRange(new string[] { "Kampüs1", "Kampüs2", "Kampüs3" });
                         }
 
-                        // Her kampüs için ayrı dosya oluştur
                         foreach (string kampus in kampusler)
                         {
-                            var kampusRows = dt.AsEnumerable()
-                                .Where(row => (row.Field<string>("b_gorev_yeri") ?? "Diğer") == kampus)
-                                .ToList();
-                            
-                            if (kampusRows.Count > 0)
-                            {
-                                var kampusDt = kampusRows.CopyToDataTable();
-                                
-                                // Kampüs numarasını belirle (13376, 13377, 13378)
-                                string kampusNo = "13376";
-                                if (kampus == "Kampüs2") kampusNo = "13377";
-                                else if (kampus == "Kampüs3") kampusNo = "13378";
+                            string kampusNo = "13376";
+                            if (kampus == "Kampüs2") kampusNo = "13377";
+                            else if (kampus == "Kampüs3") kampusNo = "13378";
 
-                                // Dosya adını oluştur
-                                string buuFileName = $"{kampusNo} BUÜ BORDRO VE PUANTAJ {DateTime.Now:MMMM yyyy}";
-                                
-                                SaveFileDialog sfd = new SaveFileDialog
+                            string buuFileName = $"{kampusNo} BUÜ BORDRO VE PUANTAJ {DateTime.Now:MMMM yyyy}";
+
+                            SaveFileDialog sfd = new SaveFileDialog
+                            {
+                                Filter = "Excel Dosyası|*.xlsx",
+                                FileName = buuFileName + ".xlsx"
+                            };
+
+                            if (sfd.ShowDialog() == DialogResult.OK)
+                            {
+                                using (var kampusWorkbook = new XLWorkbook(templatePath))
                                 {
-                                    Filter = "Excel Dosyası|*.xlsx",
-                                    FileName = buuFileName + ".xlsx"
-                                };
-                                
-                                if (sfd.ShowDialog() == DialogResult.OK)
-                                {
-                                    using (var kampusWorkbook = new XLWorkbook())
+                                    var bordroSheet = kampusWorkbook.Worksheets.FirstOrDefault(w => w.Name.Replace(" ", "").ToUpperInvariant().Contains("BORDRO"));
+                                    if (bordroSheet != null)
                                     {
-                                        var ws = kampusWorkbook.Worksheets.Add("Bordro");
-                                        
-                                        // BUÜ başlığı
-                                        ws.Cell(1, 1).Value = "BURSA ULUDAĞ ÜNİVERSİTESİ";
-                                        ws.Range(1, 1, 1, kampusDt.Columns.Count).Merge().Style.Font.Bold = true;
-                                        ws.Cell(1, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                                        
-                                        // Dönem bilgisi
-                                        ws.Cell(2, 1).Value = $"{DateTime.Now:MMMM yyyy} BORDRO VE PUANTAJ - {kampus.ToUpper()}";
-                                        ws.Range(2, 1, 2, kampusDt.Columns.Count).Merge().Style.Font.Bold = true;
-                                        ws.Cell(2, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                                        
-                                        // Tabloyu ekle (3. satırdan itibaren)
-                                        ws.Cell(3, 1).InsertTable(kampusDt);
-                                        ws.Columns().AdjustToContents();
-                                        
-                                        kampusWorkbook.SaveAs(sfd.FileName);
+                                        string kampusLabel = kampus.Replace("Kampüs", "KAMPÜS ");
+                                        string headerText = $"BURSA ULUDAĞ ÜNİVERSİTESİ GENEL SEKRETERLİK ÖZEL KALEM {kampusNo} PORTAL NOLU {kampusLabel} İŞKUR GENÇLİK PROGRAMI ÖDEME BORDROSU";
+                                        var headerCell = bordroSheet.Cell(2, 1);
+                                        var merged = headerCell.MergedRange();
+                                        if (merged != null)
+                                            merged.Value = headerText;
+                                        else
+                                            headerCell.Value = headerText;
                                     }
-                                    
-                                    MessageBox.Show($"✅ {kampus} için dosya kaydedildi: {System.IO.Path.GetFileName(sfd.FileName)}");
+
+                                    kampusWorkbook.SaveAs(sfd.FileName);
                                 }
+
+                                MessageBox.Show($"✅ {kampus} için dosya kaydedildi: {System.IO.Path.GetFileName(sfd.FileName)}");
                             }
                         }
                     }
                     else
                     {
-                        // Muhtasar veya diğer tablolar için tek sayfa
                         var ws = workbook.Worksheets.Add(tableName == "muhtasar_raporu" ? "Muhtasar Raporu" : "Rapor");
                         ws.Cell(1, 1).InsertTable(dt);
                         ws.Columns().AdjustToContents();

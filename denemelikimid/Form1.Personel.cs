@@ -4,6 +4,7 @@ using System.Data;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using MySql.Data.MySqlClient;
 using denemelikimid.Validations;
@@ -97,6 +98,11 @@ namespace denemelikimid
             btnExcelImport.Width = 160;
             btnExcelImport.Location = new Point(0, 5);
 
+            Button btnSil = CreateModernButton("🗑️ Personel Sil", colorDanger, 0, pnlRightTop);
+            btnSil.Width = 140;
+            btnSil.Height = 40;
+            btnSil.Location = new Point(720, 10);
+
             Label lblFiltre = new Label { Text = "Kampüs Seç:", AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(180, 15), ForeColor = Color.Gray };
             pnlRightTop.Controls.Add(lblFiltre);
 
@@ -130,13 +136,15 @@ namespace denemelikimid
             pnlRightTop.SendToBack();
 
             // --- OTOMATİK DÜZELTME VE SÜTUN EKLEME FONKSİYONU ---
-            void VeritabaniYapilandirVeDoldur()
+            Task VeritabaniYapilandirVeDoldurAsync()
             {
-                try
+                return Task.Run(() =>
                 {
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    try
                     {
-                        conn.Open();
+                        using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                        {
+                            conn.Open();
 
                         // 1. ADIM: pk_departman SÜTUNU VAR MI? YOKSA EKLE.
                         try
@@ -201,14 +209,20 @@ namespace denemelikimid
                             // Dolu olan kayıtları bölerek yeni sütunlara yaz (basit ayrıştırma: ilk kelime = ad, geri kalanı = soyad)
                             try
                             {
-                                string updateKatilim = @"UPDATE program_katilimcilari SET pk_ad = TRIM(SUBSTRING_INDEX(pk_ad_soyad, ' ', 1)), pk_soyad = TRIM(SUBSTR(pk_ad_soyad, LENGTH(SUBSTRING_INDEX(pk_ad_soyad, ' ', 1)) + 2)) WHERE (pk_ad IS NULL OR pk_ad = '') AND pk_ad_soyad IS NOT NULL";
+                                string updateKatilim = @"UPDATE program_katilimcilari 
+                                                         SET pk_soyad = SUBSTRING_INDEX(pk_ad_soyad, ' ', -1), 
+                                                             pk_ad = TRIM(SUBSTR(pk_ad_soyad, 1, LENGTH(pk_ad_soyad) - LENGTH(SUBSTRING_INDEX(pk_ad_soyad, ' ', -1)))) 
+                                                         WHERE (pk_ad IS NULL OR pk_ad = '') AND pk_ad_soyad IS NOT NULL AND TRIM(pk_ad_soyad) != ''";
                                 new MySqlCommand(updateKatilim, conn).ExecuteNonQuery();
                             }
                             catch { }
 
                             try
                             {
-                                string updatePuantaj = @"UPDATE puantaj SET p_ad = TRIM(SUBSTRING_INDEX(p_ad_soyad, ' ', 1)), p_soyad = TRIM(SUBSTR(p_ad_soyad, LENGTH(SUBSTRING_INDEX(p_ad_soyad, ' ', 1)) + 2)) WHERE (p_ad IS NULL OR p_ad = '') AND p_ad_soyad IS NOT NULL";
+                                string updatePuantaj = @"UPDATE puantaj 
+                                                         SET p_soyad = SUBSTRING_INDEX(p_ad_soyad, ' ', -1), 
+                                                             p_ad = TRIM(SUBSTR(p_ad_soyad, 1, LENGTH(p_ad_soyad) - LENGTH(SUBSTRING_INDEX(p_ad_soyad, ' ', -1)))) 
+                                                         WHERE (p_ad IS NULL OR p_ad = '') AND p_ad_soyad IS NOT NULL AND TRIM(p_ad_soyad) != ''";
                                 new MySqlCommand(updatePuantaj, conn).ExecuteNonQuery();
                             }
                             catch { }
@@ -228,15 +242,16 @@ namespace denemelikimid
                                          WHEN 1 THEN 'İdari' WHEN 2 THEN 'Teknik' WHEN 3 THEN 'Güvenlik' WHEN 4 THEN 'Temizlik' ELSE 'Bilişim' END
                                      WHERE pk_departman IS NULL OR pk_departman = ''";
                         new MySqlCommand(sqlDeptFix, conn).ExecuteNonQuery();
+                        }
                     }
-                }
-                catch { }
+                    catch { }
+                });
             }
 
             // --- VERİ ÇEKME ---
-            void VerileriGetir(string kampusSecimi)
+            Task<DataTable> FetchPersonelDataAsync(string kampusSecimi)
             {
-                try
+                return Task.Run(() =>
                 {
                     using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
                     {
@@ -256,19 +271,39 @@ namespace denemelikimid
                         {
                             DataTable dt = new DataTable();
                             da.Fill(dt);
-                            dgvPersonelListesi.DataSource = dt;
+                            return dt;
                         }
                     }
-                }
-                catch (Exception ex) { MessageBox.Show("Hata: " + ex.Message); }
+                });
+            }
+
+            Task RefreshPersonelListAsync(string kampusSecimi)
+            {
+                return FetchPersonelDataAsync(kampusSecimi)
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            var ex = t.Exception?.GetBaseException() ?? t.Exception;
+                            MessageBox.Show("Hata: " + ex?.Message);
+                            return;
+                        }
+
+                        if (dgvPersonelListesi.IsDisposed)
+                        {
+                            return;
+                        }
+
+                        dgvPersonelListesi.DataSource = t.Result;
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
             }
 
             // --- ÇALIŞTIR ---
-            VeritabaniYapilandirVeDoldur(); // Önce tabloyu düzelt ve doldur
-            VerileriGetir("Tümü");          // Sonra listeyi getir
+            VeritabaniYapilandirVeDoldurAsync()
+                .ContinueWith(t => RefreshPersonelListAsync("Tümü"), TaskScheduler.FromCurrentSynchronizationContext());
 
             // --- EVENTLER ---
-            cmbKampusFiltre.SelectedIndexChanged += (s, e) => VerileriGetir(cmbKampusFiltre.SelectedItem?.ToString() ?? "Tümü");
+            cmbKampusFiltre.SelectedIndexChanged += (s, e) => RefreshPersonelListAsync(cmbKampusFiltre.SelectedItem?.ToString() ?? "Tümü");
 
             txtAra.TextChanged += (s, e) => {
                 DataTable dt = dgvPersonelListesi.DataSource as DataTable;
@@ -276,6 +311,76 @@ namespace denemelikimid
                 {
                     string ara = txtAra.Text.Trim().Replace("'", "''");
                     dt.DefaultView.RowFilter = string.IsNullOrEmpty(ara) ? "" : $"[Ad] LIKE '%{ara}%' OR [Soyad] LIKE '%{ara}%' OR [TC] LIKE '%{ara}%'";
+                }
+            };
+
+            btnSil.Click += (s, e) =>
+            {
+                if (dgvPersonelListesi.SelectedRows.Count == 0)
+                {
+                    MessageBox.Show("Lütfen silmek istediğiniz personeli seçin.", "Uyarı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string tc = dgvPersonelListesi.SelectedRows[0].Cells["TC"].Value?.ToString();
+                string ad = dgvPersonelListesi.SelectedRows[0].Cells["Ad"].Value?.ToString();
+                string soyad = dgvPersonelListesi.SelectedRows[0].Cells["Soyad"].Value?.ToString();
+
+                if (string.IsNullOrWhiteSpace(tc))
+                {
+                    MessageBox.Show("Seçili kaydın TC bilgisi bulunamadı.", "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                var confirm = MessageBox.Show(
+                    $"{ad} {soyad} (TC: {tc}) kaydını silmek istediğinize emin misiniz?\n\nBu işlem personel ve puantaj kayıtlarını kaldırır.",
+                    "Personel Sil",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (confirm != DialogResult.Yes)
+                    return;
+
+                try
+                {
+                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    {
+                        conn.Open();
+                        using (var tr = conn.BeginTransaction())
+                        {
+                            try
+                            {
+                                var cmdPuantaj = new MySqlCommand("DELETE FROM puantaj WHERE p_tc = @tc", conn, tr);
+                                cmdPuantaj.Parameters.AddWithValue("@tc", tc);
+                                cmdPuantaj.ExecuteNonQuery();
+
+                                var cmdPersonel = new MySqlCommand("DELETE FROM program_katilimcilari WHERE pk_tc = @tc", conn, tr);
+                                cmdPersonel.Parameters.AddWithValue("@tc", tc);
+                                int deleted = cmdPersonel.ExecuteNonQuery();
+
+                                tr.Commit();
+
+                                if (deleted > 0)
+                                {
+                                    MessageBox.Show("✅ Personel ve puantaj kayıtları silindi.", "Başarılı", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                    RefreshPersonelListAsync(cmbKampusFiltre.SelectedItem?.ToString() ?? "Tümü");
+                                }
+                                else
+                                {
+                                    MessageBox.Show("Silinecek personel bulunamadı.", "Bilgi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                }
+                            }
+                            catch
+                            {
+                                try { tr.Rollback(); } catch { }
+                                throw;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Silme sırasında hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             };
 
@@ -408,8 +513,8 @@ namespace denemelikimid
                         cmdPua.ExecuteNonQuery();
                     }
                     MessageBox.Show("✅ Personel başarıyla eklendi.", "Başarılı", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    VeritabaniYapilandirVeDoldur();
-                    VerileriGetir(cmbKampusFiltre.Text);
+                    VeritabaniYapilandirVeDoldurAsync()
+                        .ContinueWith(t => RefreshPersonelListAsync(cmbKampusFiltre.Text), TaskScheduler.FromCurrentSynchronizationContext());
 
                     txtTc.Clear(); txtAd.Clear(); txtSoyad.Clear(); txtTelefon.Clear(); txtIban.Clear();
                 }
@@ -420,7 +525,12 @@ namespace denemelikimid
             btnExcelImport.Click += (s, e) =>
             {
                 OpenFileDialog ofd = new OpenFileDialog { Filter = "Excel|*.xlsx" };
-                if (ofd.ShowDialog() == DialogResult.OK) { /* Excel işlemleri */ VeritabaniYapilandirVeDoldur(); VerileriGetir("Tümü"); }
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    /* Excel işlemleri */
+                    VeritabaniYapilandirVeDoldurAsync()
+                        .ContinueWith(t => RefreshPersonelListAsync("Tümü"), TaskScheduler.FromCurrentSynchronizationContext());
+                }
             };
         }
 
