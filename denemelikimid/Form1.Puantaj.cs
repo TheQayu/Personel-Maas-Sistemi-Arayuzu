@@ -5,7 +5,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using ClosedXML.Excel;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 using denemelikimid.DataBase;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -249,6 +249,8 @@ namespace denemelikimid
                                 dgvPuantaj.SelectionMode = DataGridViewSelectionMode.CellSelect;
                                 dgvPuantaj.ColumnHeadersHeight = 66;
                                 dgvPuantaj.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                                dgvPuantaj.DefaultCellStyle.SelectionForeColor = Color.Black;
+                                dgvPuantaj.DefaultCellStyle.SelectionBackColor = Color.FromArgb(220, 235, 255);
                                 dgvPuantaj.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
                                 dgvPuantaj.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Bold);
                                 dgvPuantaj.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
@@ -272,6 +274,7 @@ namespace denemelikimid
                                     {
                                         bool isSelectedRow = (dgvPuantaj.CurrentCell != null && dgvPuantaj.CurrentCell.RowIndex == e.RowIndex);
                                         Color backColor = e.CellStyle.BackColor;
+                                        e.CellStyle.ForeColor = Color.Black;
 
                                         // Sadece boyanmamış (beyaz/boş veya haftasonu gri) hücrelerde seçili satır efekti yap
                                         bool isDefaultColor = (backColor.ToArgb() == Color.White.ToArgb() || backColor.ToArgb() == Color.Empty.ToArgb() || backColor.ToArgb() == Color.FromArgb(245, 245, 245).ToArgb());
@@ -347,12 +350,12 @@ namespace denemelikimid
                                                        FROM puantaj p
                                                        LEFT JOIN program_katilimcilari pk ON pk.pk_tc = p.p_tc
                                                        WHERE pk.pk_tc IS NULL";
-                        new MySqlCommand(fixMissingKatilimci, conn).ExecuteNonQuery();
+                        new SqliteCommand(fixMissingKatilimci, conn).ExecuteNonQuery();
 
                         string fixEmptyCampus = @"UPDATE program_katilimcilari
                                                   SET pk_gorev_yeri = 'Kampüs1'
                                                   WHERE pk_gorev_yeri IS NULL OR TRIM(pk_gorev_yeri) = '' OR TRIM(pk_gorev_yeri) = 'Diğer'";
-                        new MySqlCommand(fixEmptyCampus, conn).ExecuteNonQuery();
+                        new SqliteCommand(fixEmptyCampus, conn).ExecuteNonQuery();
                     }
                     catch { }
 
@@ -363,7 +366,7 @@ namespace denemelikimid
                         LEFT JOIN program_katilimcilari pk ON p.p_tc = pk.pk_tc
                         ORDER BY kampus";
 
-                    var cmdKampusler = new MySqlCommand(sqlKampusler, conn);
+                    var cmdKampusler = new SqliteCommand(sqlKampusler, conn);
                     using (var drKampusler = cmdKampusler.ExecuteReader())
                     {
                         while (drKampusler.Read())
@@ -459,7 +462,7 @@ namespace denemelikimid
                         WHERE COALESCE(NULLIF(TRIM(pk.pk_gorev_yeri), ''), 'Kampüs1') = @kampus
                         ORDER BY p_ad_soyad, p_tc";
 
-                    var cmd = new MySqlCommand(sql, conn);
+                    var cmd = new SqliteCommand(sql, conn);
                     cmd.Parameters.AddWithValue("@kampus", kampus);
                     cmd.Parameters.AddWithValue("@donem", donem);
                     using (var dr = cmd.ExecuteReader())
@@ -499,8 +502,9 @@ namespace denemelikimid
                                 var cell = dgvPuantaj.Rows[rowIndex].Cells[i + 2];
                                 cell.Value = val;
                                 if (val == "X") cell.Style.BackColor = Color.LightGreen;
-                                else if (val == "İ") cell.Style.BackColor = Color.LightYellow;
+                                else if (val == "İ") cell.Style.BackColor = Color.FromArgb(220, 235, 255);
                                 else if (val == "R") cell.Style.BackColor = Color.LightPink;
+                                cell.Style.ForeColor = Color.Black;
                             }
                         }
                     }
@@ -567,39 +571,55 @@ namespace denemelikimid
 
             void HucreTiklamaOlayiEkle(DataGridView dgvPuantaj)
             {
-                dgvPuantaj.CellClick += (s, e) =>
+                dgvPuantaj.CellMouseDown += (s, e) =>
                 {
-                    if (e.RowIndex >= 0 && e.ColumnIndex >= 2)
+                    if (e.Button == MouseButtons.Right && e.RowIndex >= 0 && e.ColumnIndex >= 2)
                     {
+                        dgvPuantaj.CurrentCell = dgvPuantaj.Rows[e.RowIndex].Cells[e.ColumnIndex];
                         var cell = dgvPuantaj.Rows[e.RowIndex].Cells[e.ColumnIndex];
-                        string val = cell.Value?.ToString() ?? "";
+                        cell.Value = "";
+                        cell.Style.BackColor = Color.White;
+                        cell.Style.ForeColor = dgvPuantaj.DefaultCellStyle.ForeColor;
+                    }
+                };
 
-                        if (val == "")
+                dgvPuantaj.CellMouseUp += (s, e) =>
+                {
+                    if (e.Button != MouseButtons.Left || e.RowIndex < 0 || e.ColumnIndex < 2)
+                        return;
+
+                    var cell = dgvPuantaj.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                    string val = cell.Value?.ToString() ?? "";
+
+                    if (val == "")
+                    {
+                        if (HaftalikLimitAsildiMi(dgvPuantaj, e.RowIndex, e.ColumnIndex))
                         {
-                            if (HaftalikLimitAsildiMi(dgvPuantaj, e.RowIndex, e.ColumnIndex))
-                            {
-                                MessageBox.Show("Bu hafta için maksimum 3 gün çalışma limiti doldu!", "Uyarı",
-                                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return;
-                            }
-                            cell.Value = "X";
-                            cell.Style.BackColor = Color.LightGreen;
+                            MessageBox.Show("Bu hafta için maksimum 3 gün çalışma limiti doldu!", "Uyarı",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
                         }
-                        else if (val == "X")
-                        {
-                            cell.Value = "İ";
-                            cell.Style.BackColor = Color.LightYellow;
-                        }
-                        else if (val == "İ")
-                        {
-                            cell.Value = "R";
-                            cell.Style.BackColor = Color.LightPink;
-                        }
-                        else
-                        {
-                            cell.Value = "";
-                            cell.Style.BackColor = Color.White;
-                        }
+                        cell.Value = "X";
+                        cell.Style.BackColor = Color.LightGreen;
+                        cell.Style.ForeColor = Color.Black;
+                    }
+                    else if (val == "X")
+                    {
+                        cell.Value = "İ";
+                        cell.Style.BackColor = Color.FromArgb(220, 235, 255);
+                        cell.Style.ForeColor = Color.Black;
+                    }
+                    else if (val == "İ")
+                    {
+                        cell.Value = "R";
+                        cell.Style.BackColor = Color.LightPink;
+                        cell.Style.ForeColor = Color.Black;
+                    }
+                    else
+                    {
+                        cell.Value = "";
+                        cell.Style.BackColor = Color.White;
+                        cell.Style.ForeColor = dgvPuantaj.DefaultCellStyle.ForeColor;
                     }
                 };
             }
@@ -648,12 +668,19 @@ namespace denemelikimid
                         // Çoklu ay desteği için puantaj tablosundaki tüm UNIQUE kısıtlarını kaldır
                         try
                         {
-                            var dtIdx = new DataTable();
-                            using (var da = new MySqlDataAdapter("SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'puantaj' AND NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY' GROUP BY INDEX_NAME", conn))
-                                da.Fill(dtIdx);
-                            foreach (DataRow dr in dtIdx.Rows)
+                            using (var idxCmd = new SqliteCommand("PRAGMA index_list('puantaj')", conn))
+                            using (var reader = idxCmd.ExecuteReader())
                             {
-                                try { new MySqlCommand($"ALTER TABLE puantaj DROP INDEX `{dr["INDEX_NAME"]}`", conn).ExecuteNonQuery(); } catch { }
+                                while (reader.Read())
+                                {
+                                    var isUnique = Convert.ToInt32(reader["unique"]) == 1;
+                                    var indexName = reader["name"].ToString();
+                                    if (isUnique && !string.IsNullOrWhiteSpace(indexName))
+                                    {
+                                        var safeName = indexName.Replace("\"", "\"\"");
+                                        try { new SqliteCommand($"DROP INDEX IF EXISTS \"{safeName}\"", conn).ExecuteNonQuery(); } catch { }
+                                    }
+                                }
                             }
                         } catch { }
 
@@ -693,7 +720,7 @@ namespace denemelikimid
                                         // Seçili ay için kayıt var mı kontrol et
                                         string checkSql = "SELECT COUNT(*) FROM puantaj WHERE p_tc = @tc AND p_yil_ay = @donem";
                                         int mevcutKayit;
-                                        using (var checkCmd = new MySqlCommand(checkSql, conn, transaction))
+                                        using (var checkCmd = new SqliteCommand(checkSql, conn, transaction))
                                         {
                                             checkCmd.Parameters.AddWithValue("@tc", tc);
                                             checkCmd.Parameters.AddWithValue("@donem", donem);
@@ -703,7 +730,7 @@ namespace denemelikimid
                                         if (mevcutKayit > 0)
                                         {
                                             string sqlUpdate = "UPDATE puantaj SET p_gun_detaylari = @detay, p_calistigi_gun_sayisi = @toplam WHERE p_tc = @tc AND p_yil_ay = @donem";
-                                            using (var cmd = new MySqlCommand(sqlUpdate, conn, transaction))
+                                            using (var cmd = new SqliteCommand(sqlUpdate, conn, transaction))
                                             {
                                                 cmd.Parameters.AddWithValue("@detay", detayString);
                                                 cmd.Parameters.AddWithValue("@toplam", toplamCalisilanGun);
@@ -719,7 +746,7 @@ namespace denemelikimid
                                                                  SELECT p_tc, p_ad_soyad, p_iban, @detay, @toplam, @donem,
                                                                         p_ise_baslama_tarihi, p_isten_ayrilma_tarihi, p_devamsizlik, p_yillik_izin, p_ad, p_soyad
                                                                  FROM puantaj WHERE p_tc = @tc LIMIT 1";
-                                            using (var cmd = new MySqlCommand(sqlInsert, conn, transaction))
+                                            using (var cmd = new SqliteCommand(sqlInsert, conn, transaction))
                                             {
                                                 cmd.Parameters.AddWithValue("@detay", detayString);
                                                 cmd.Parameters.AddWithValue("@toplam", toplamCalisilanGun);
@@ -846,6 +873,7 @@ namespace denemelikimid
                                     }
 
                                     var bankaSheet = workbook.Worksheets.FirstOrDefault(w => w.Name.Replace(" ", "").ToUpperInvariant().Contains("BANKA"));
+                                    var halkbankSheet = workbook.Worksheets.FirstOrDefault(w => w.Name.Replace(" ", "").ToUpperInvariant().Contains("HALK"));
                                     if (bankaSheet != null)
                                     {
                                         string formulaSheetName = exportSadeceSeciliKampus && !string.IsNullOrEmpty(seciliKampusText)
@@ -888,6 +916,17 @@ namespace denemelikimid
                                         {
                                             headerCell.Value = headerText;
                                         }
+                                    };
+
+                                    Action<IXLWorksheet, string> updateHalkbankInfo = (sheet, kampusName) =>
+                                    {
+                                        if (sheet == null || string.IsNullOrEmpty(kampusName)) return;
+                                        string kampusNo = kampusNumaralari.ContainsKey(kampusName) ? kampusNumaralari[kampusName] : "13376";
+                                        string kampusIndex = kampusName.Replace("Kampüs", "").Trim();
+                                        if (string.IsNullOrWhiteSpace(kampusIndex)) kampusIndex = "1";
+                                        string ayAdi = dtpDonem.Value.ToString("MMMM", new CultureInfo("tr-TR"));
+                                        string infoText = $"{donemYear} {ayAdi} Ayı {kampusNo} Kampüs {kampusIndex}";
+                                        sheet.Cell(9, 3).Value = infoText;
                                     };
 
                                     Action<IXLWorksheet, string> updateBankaHeader = (sheet, kampusName) =>
@@ -936,6 +975,7 @@ namespace denemelikimid
                                         updateBordroHeader(bordroSheet, seciliKampusText);
                                         updatePuantajHeader(seciliKampusText);
                                         updateBankaHeader(bankaSheet, seciliKampusText);
+                                        updateHalkbankInfo(halkbankSheet, seciliKampusText);
                                     }
                                     else
                                     {
@@ -947,6 +987,7 @@ namespace denemelikimid
 
                                             updateBordroHeader(bordroSheet, kampus);
                                             updateBankaHeader(bankaSheet, kampus);
+                                            updateHalkbankInfo(halkbankSheet, kampus);
                                         }
                                     }
 
@@ -1298,7 +1339,7 @@ namespace denemelikimid
                                                                   MAX(NULLIF(p.p_ad, '')),
                                                                   MAX(NULLIF(p.p_ad_soyad, '')),
                                                                   p.p_tc)";
-                                            using (var cmdAll = new MySqlCommand(sqlAll, conn))
+                                            using (var cmdAll = new SqliteCommand(sqlAll, conn))
                                             {
                                             cmdAll.Parameters.AddWithValue("@kampus", currentKampus);
                                             cmdAll.Parameters.AddWithValue("@donem", $"{donemYear:D4}-{donemMonth:D2}");
@@ -1788,7 +1829,7 @@ namespace denemelikimid
                                                                MAX(NULLIF(p.p_ad, '')),
                                                                MAX(NULLIF(p.p_ad_soyad, '')),
                                                                p.p_tc)";
-                                            using (var cmd = new MySqlCommand(sql, conn))
+                                            using (var cmd = new SqliteCommand(sql, conn))
                                             {
                                                 cmd.Parameters.AddWithValue("@kampus", kampus);
                                                 cmd.Parameters.AddWithValue("@donem", $"{donemYear:D4}-{donemMonth:D2}");
@@ -2035,7 +2076,7 @@ namespace denemelikimid
                                                                 GROUP BY p.p_tc
                                                                 ORDER BY p_ad, p_ad_soyad, p_tc";
 
-                                                    using (var bCmd = new MySqlCommand(bSql, connBanka))
+                                                    using (var bCmd = new SqliteCommand(bSql, connBanka))
                                                     {
                                                         bCmd.Parameters.AddWithValue("@donem", $"{donemYear:D4}-{donemMonth:D2}");
                                                         bCmd.Parameters.AddWithValue("@kampus", kampus);

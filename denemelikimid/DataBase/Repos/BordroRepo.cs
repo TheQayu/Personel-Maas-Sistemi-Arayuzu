@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Text;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 using denemelikimid.DataBase.Models;
 
 namespace denemelikimid.DataBase.Repos
@@ -35,24 +35,24 @@ namespace denemelikimid.DataBase.Repos
         @toplam_kesinti, @odenmesi_gereken_net_tutar )";
             _db.Execute(query, 
             
-                new MySqlParameter("@tc", model.Bdr_tc),
-                new MySqlParameter("@adsoyad", model.Bdr_ad_soyad),
-                new MySqlParameter("@gorevyeri", model.Bdr_gorev_yeri),
-                new MySqlParameter("@aylik_calisilan_gun", model.Bdr_aylik_calisilan_gun),
-                new MySqlParameter("@cep_harcligi", model.Bdr_cep_harcligi),
-                new MySqlParameter("@sosyal_guvenlik_primi", model.Bdr_sosyal_guvenlik_primi),
-                new MySqlParameter("@tahakkuk_tplm", model.Bdr_tahakkuk_toplami),
-                new MySqlParameter("@gelir_vergisi_matrahi", model.Bdr_gelir_vergisi_matrahi),
-                new MySqlParameter("@hesaplanan_gelir_vergisi", model.Bdr_hesaplanan_gelir_vergisi),
-                new MySqlParameter("@gc_istisna_tutari", model.Bdr_gv_istisna_tutari),
-                new MySqlParameter("@gelir_vergisi_kesintisi", model.Bdr_hesaplanan_damga_vergisi),
-                new MySqlParameter("@hesaplanan_damga_vergisi", model.Bdr_hesaplanan_damga_vergisi),
-                new MySqlParameter("@dv_istisna_tutari", model.Bdr_dv_istisna_tutari),
-                new MySqlParameter("@damga_verigisi_kesintisi", model.Bdr_damga_vergisi_kesintisi),
-                new MySqlParameter("@gssp_kvsk", model.Bdr_gssp_kvsk),
-                new MySqlParameter("@icra_kesintisi", model.Bdr_icra_kesintisi),
-                new MySqlParameter("@toplam_kesinti", model.Bdr_toplam_kesinti),
-                new MySqlParameter("@odenmesi_gereken_net_tutar", model.Bdr_net_odenek)
+                new SqliteParameter("@tc", model.Bdr_tc),
+                new SqliteParameter("@adsoyad", model.Bdr_ad_soyad),
+                new SqliteParameter("@gorevyeri", model.Bdr_gorev_yeri),
+                new SqliteParameter("@aylik_calisilan_gun", model.Bdr_aylik_calisilan_gun),
+                new SqliteParameter("@cep_harcligi", model.Bdr_cep_harcligi),
+                new SqliteParameter("@sosyal_guvenlik_primi", model.Bdr_sosyal_guvenlik_primi),
+                new SqliteParameter("@tahakkuk_tplm", model.Bdr_tahakkuk_toplami),
+                new SqliteParameter("@gelir_vergisi_matrahi", model.Bdr_gelir_vergisi_matrahi),
+                new SqliteParameter("@hesaplanan_gelir_vergisi", model.Bdr_hesaplanan_gelir_vergisi),
+                new SqliteParameter("@gc_istisna_tutari", model.Bdr_gv_istisna_tutari),
+                new SqliteParameter("@gelir_vergisi_kesintisi", model.Bdr_hesaplanan_damga_vergisi),
+                new SqliteParameter("@hesaplanan_damga_vergisi", model.Bdr_hesaplanan_damga_vergisi),
+                new SqliteParameter("@dv_istisna_tutari", model.Bdr_dv_istisna_tutari),
+                new SqliteParameter("@damga_verigisi_kesintisi", model.Bdr_damga_vergisi_kesintisi),
+                new SqliteParameter("@gssp_kvsk", model.Bdr_gssp_kvsk),
+                new SqliteParameter("@icra_kesintisi", model.Bdr_icra_kesintisi),
+                new SqliteParameter("@toplam_kesinti", model.Bdr_toplam_kesinti),
+                new SqliteParameter("@odenmesi_gereken_net_tutar", model.Bdr_net_odenek)
             );
             
         }
@@ -60,7 +60,7 @@ namespace denemelikimid.DataBase.Repos
         {
             _db.Execute(
                 @"DELETE FROM bordro WHERE b_id = @id",
-                new MySqlParameter("@id", model.Bdr_id)
+                new SqliteParameter("@id", model.Bdr_id)
             );
         }
         public void Guncelle(BordroModel model)
@@ -86,24 +86,24 @@ namespace denemelikimid.DataBase.Repos
                 b_odenmesi_gereken_net_tutar = @odenmesi_gereken_net_tutar
                 WHERE idbordo = @id";
             _db.Execute(query,
-                new MySqlParameter("@tc", model.Bdr_tc),
-                new MySqlParameter("@adsoyad", model.Bdr_ad_soyad),
-                new MySqlParameter("@gorevyeri", model.Bdr_gorev_yeri),
-                new MySqlParameter("@aylik_calisilan_gun", model.Bdr_aylik_calisilan_gun),
-                new MySqlParameter("@cep_harcligi", model.Bdr_cep_harcligi),
-                new MySqlParameter("@sosyal_guvenlik_primi", model.Bdr_sosyal_guvenlik_primi),
-                new MySqlParameter("@tahakkuk_tplm", model.Bdr_tahakkuk_toplami),
-                new MySqlParameter("@gelir_vergisi_matrahi", model.Bdr_gelir_vergisi_matrahi),
-                new MySqlParameter("@hesaplanan_gelir_vergisi", model.Bdr_hesaplanan_gelir_vergisi),
-                new MySqlParameter("@gc_istisna_tutari", model.Bdr_gv_istisna_tutari),
-                new MySqlParameter("@gelir_vergisi_kesintisi", model.Bdr_hesaplanan_gelir_vergisi),
-                new MySqlParameter("@hesaplanan_damga_vergisi", model.Bdr_hesaplanan_damga_vergisi),
-                new MySqlParameter("@dv_istisna_tutari", model.Bdr_dv_istisna_tutari),
-                new MySqlParameter("@damga_verigisi_kesintisi", model.Bdr_damga_vergisi_kesintisi),
-                new MySqlParameter("@gssp_kvsk", model.Bdr_gssp_kvsk),
-                new MySqlParameter("@icra_kesintisi", model.Bdr_icra_kesintisi),
-                new MySqlParameter("@toplam_kesinti", model.Bdr_toplam_kesinti),
-                new MySqlParameter("@odenmesi_gereken_net_tutar", model.Bdr_net_odenek)
+                new SqliteParameter("@tc", model.Bdr_tc),
+                new SqliteParameter("@adsoyad", model.Bdr_ad_soyad),
+                new SqliteParameter("@gorevyeri", model.Bdr_gorev_yeri),
+                new SqliteParameter("@aylik_calisilan_gun", model.Bdr_aylik_calisilan_gun),
+                new SqliteParameter("@cep_harcligi", model.Bdr_cep_harcligi),
+                new SqliteParameter("@sosyal_guvenlik_primi", model.Bdr_sosyal_guvenlik_primi),
+                new SqliteParameter("@tahakkuk_tplm", model.Bdr_tahakkuk_toplami),
+                new SqliteParameter("@gelir_vergisi_matrahi", model.Bdr_gelir_vergisi_matrahi),
+                new SqliteParameter("@hesaplanan_gelir_vergisi", model.Bdr_hesaplanan_gelir_vergisi),
+                new SqliteParameter("@gc_istisna_tutari", model.Bdr_gv_istisna_tutari),
+                new SqliteParameter("@gelir_vergisi_kesintisi", model.Bdr_hesaplanan_gelir_vergisi),
+                new SqliteParameter("@hesaplanan_damga_vergisi", model.Bdr_hesaplanan_damga_vergisi),
+                new SqliteParameter("@dv_istisna_tutari", model.Bdr_dv_istisna_tutari),
+                new SqliteParameter("@damga_verigisi_kesintisi", model.Bdr_damga_vergisi_kesintisi),
+                new SqliteParameter("@gssp_kvsk", model.Bdr_gssp_kvsk),
+                new SqliteParameter("@icra_kesintisi", model.Bdr_icra_kesintisi),
+                new SqliteParameter("@toplam_kesinti", model.Bdr_toplam_kesinti),
+                new SqliteParameter("@odenmesi_gereken_net_tutar", model.Bdr_net_odenek)
             );
          }
 

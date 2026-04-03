@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Text;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 
 namespace denemelikimid.DataBase.Repos
 {
@@ -34,14 +34,14 @@ namespace denemelikimid.DataBase.Repos
             )";
 
                 _db.Execute(query,
-                    new MySqlParameter("@iban", model.Pnt_iban),
-                    new MySqlParameter("@tc", model.Pnt_tc),
-                    new MySqlParameter("@ad_soyad", model.Pnt_ad_soyad),
-                    new MySqlParameter("@cal_gun", model.Pnt_calisilan_gun_sayisi),
-                    new MySqlParameter("@devam", model.Pnt_devamsizlik),
-                    new MySqlParameter("@y_izin", model.Pnt_yillik_izin),
-                    new MySqlParameter("@ise_bas", model.Pnt_ise_baslama_tarihi),
-                    new MySqlParameter("@ist_ayril", model.Pnt_isten_ayrilma_tarihi));
+                    new SqliteParameter("@iban", model.Pnt_iban),
+                    new SqliteParameter("@tc", model.Pnt_tc),
+                    new SqliteParameter("@ad_soyad", model.Pnt_ad_soyad),
+                    new SqliteParameter("@cal_gun", model.Pnt_calisilan_gun_sayisi),
+                    new SqliteParameter("@devam", model.Pnt_devamsizlik),
+                    new SqliteParameter("@y_izin", model.Pnt_yillik_izin),
+                    new SqliteParameter("@ise_bas", model.Pnt_ise_baslama_tarihi),
+                    new SqliteParameter("@ist_ayril", model.Pnt_isten_ayrilma_tarihi));
             }
 
             
@@ -60,22 +60,22 @@ namespace denemelikimid.DataBase.Repos
             WHERE idpuantaj = @id";
 
                 _db.Execute(query,
-                    new MySqlParameter("@id", model.Pnt_id),
-                    new MySqlParameter("@iban", model.Pnt_iban),
-                    new MySqlParameter("@tc", model.Pnt_tc),
-                    new MySqlParameter("@ad_soyad", model.Pnt_ad_soyad),
-                    new MySqlParameter("@cal_gun", model.Pnt_calisilan_gun_sayisi),
-                    new MySqlParameter("@devam", model.Pnt_devamsizlik),
-                    new MySqlParameter("@y_izin", model.Pnt_yillik_izin),
-                    new MySqlParameter("@ise_bas", model.Pnt_ise_baslama_tarihi),
-                    new MySqlParameter("@ist_ayril", model.Pnt_isten_ayrilma_tarihi));
+                    new SqliteParameter("@id", model.Pnt_id),
+                    new SqliteParameter("@iban", model.Pnt_iban),
+                    new SqliteParameter("@tc", model.Pnt_tc),
+                    new SqliteParameter("@ad_soyad", model.Pnt_ad_soyad),
+                    new SqliteParameter("@cal_gun", model.Pnt_calisilan_gun_sayisi),
+                    new SqliteParameter("@devam", model.Pnt_devamsizlik),
+                    new SqliteParameter("@y_izin", model.Pnt_yillik_izin),
+                    new SqliteParameter("@ise_bas", model.Pnt_ise_baslama_tarihi),
+                    new SqliteParameter("@ist_ayril", model.Pnt_isten_ayrilma_tarihi));
             }
 
             
             public void Sil(int id)
             {
                 string query = "DELETE FROM puantaj WHERE idpuantaj = @id";
-                _db.Execute(query, new MySqlParameter("@id", id));
+                _db.Execute(query, new SqliteParameter("@id", id));
             }
         }
     }

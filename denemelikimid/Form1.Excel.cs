@@ -6,7 +6,8 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using ClosedXML.Excel;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
+using denemelikimid.DataBase;
 using denemelikimid.Validations;
 
 namespace denemelikimid
@@ -148,18 +149,17 @@ namespace denemelikimid
                 {
                     float gunlukUcret = 1375.00f;
 
-                    using (var conn =
-                           new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
-                        new MySqlCommand("TRUNCATE TABLE banka_listesi", conn).ExecuteNonQuery();
+                        new SqliteCommand("DELETE FROM banka_listesi", conn).ExecuteNonQuery();
 
                         string sql = @"INSERT INTO banka_listesi (bl_tc, bl_ad_soyad, bl_iban_no, bl_tutar)
                                SELECT p_tc, p_ad_soyad, p_iban, (p_calistigi_gun_sayisi * @ucret) 
                                FROM puantaj 
                                WHERE p_calistigi_gun_sayisi > 0";
 
-                        using (var cmd = new MySqlCommand(sql, conn))
+                        using (var cmd = new SqliteCommand(sql, conn))
                         {
                             cmd.Parameters.AddWithValue("@ucret", gunlukUcret);
                             int sayi = cmd.ExecuteNonQuery();
@@ -183,15 +183,15 @@ namespace denemelikimid
                 try
                 {
                     DataTable dt = new DataTable();
-                    using (var conn =
-                           new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
                         string sql =
                             "SELECT bl_ad_soyad AS 'Ad Soyad', bl_iban_no AS 'IBAN', bl_tutar AS 'Tutar' FROM banka_listesi";
-                        using (var da = new MySqlDataAdapter(sql, conn))
+                        using (var cmd = new SqliteCommand(sql, conn))
+                        using (var reader = cmd.ExecuteReader())
                         {
-                            da.Fill(dt);
+                            dt.Load(reader);
                         }
                     }
 
@@ -257,6 +257,49 @@ namespace denemelikimid
                    || normalized == "AD SOYAD";
         }
 
+        private static void SplitFullName(string fullName, out string first, out string last)
+        {
+            first = "";
+            last = "";
+            if (string.IsNullOrWhiteSpace(fullName)) return;
+            var parts = fullName.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1)
+            {
+                first = parts[0];
+            }
+            else if (parts.Length > 1)
+            {
+                last = parts[parts.Length - 1];
+                first = string.Join(" ", parts.Take(parts.Length - 1));
+            }
+        }
+
+        private static string NormalizeNameValue(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            return text.Trim().ToUpperInvariant()
+                .Replace("İ", "I")
+                .Replace("Ğ", "G")
+                .Replace("Ü", "U")
+                .Replace("Ş", "S")
+                .Replace("Ö", "O")
+                .Replace("Ç", "C");
+        }
+
+        private static bool IsMonthLike(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string normalized = NormalizeNameValue(text);
+            string token = new string(normalized.Where(char.IsLetter).ToArray());
+            if (string.IsNullOrWhiteSpace(token) || token.Length < 3) return false;
+            string[] months =
+            {
+                "OCAK", "SUBAT", "MART", "NISAN", "MAYIS", "HAZIRAN",
+                "TEMMUZ", "AGUSTOS", "EYLUL", "EKIM", "KASIM", "ARALIK"
+            };
+            return months.Any(m => m.StartsWith(token) || token.StartsWith(m));
+        }
+
         /// <summary>
         /// BUÜ formatındaki Excel dosyasını import eder (Bordro ve Puantaj bilgilerini içerir)
         /// </summary>
@@ -315,8 +358,7 @@ namespace denemelikimid
                         return IsExcelHeaderLike(t)
                                || t.Contains("KAMPUS")
                                || t == "GUVENLIK" || t == "TEMIZLIK" || t == "IDARI" || t == "BILISIM" || t == "TEKNIK" || t == "AKADEMIK"
-                               || t == "OCAK" || t == "SUBAT" || t == "MART" || t == "NISAN" || t == "MAYIS" || t == "HAZIRAN"
-                               || t == "TEMMUZ" || t == "AGUSTOS" || t == "EYLUL" || t == "EKIM" || t == "KASIM" || t == "ARALIK"
+                               || IsMonthLike(t)
                                || t == "X" || t == "I" || t == "R";
                     }
 
@@ -456,7 +498,60 @@ namespace denemelikimid
                         }
                     }
 
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    bool IsNameCandidate(string value)
+                    {
+                        if (string.IsNullOrWhiteSpace(value)) return false;
+                        string v = value.Trim();
+                        if (IsNameNoise(v)) return false;
+                        if (v.All(char.IsDigit)) return false;
+                        if (v.Replace(" ", "").ToUpperInvariant().StartsWith("TR") && v.Replace(" ", "").Length >= 26) return false;
+                        if (InputValidator.IsValidTCNumber(CleanDigits(v))) return false;
+                        return HasLetter(v);
+                    }
+
+                    if ((adCol == -1 || soyadCol == -1) && tcCol > 0)
+                    {
+                        var nameScores = new Dictionary<int, int>();
+                        for (int col = tcCol + 1; col <= lastCol; col++)
+                        {
+                            if (col == tcCol || col == ibanCol || col == gunCol || col == adSoyadCol) continue;
+                            if (dayColumnMap.Values.Contains(col)) continue;
+                            int score = 0;
+                            for (int row = firstRow; row <= Math.Min(lastRow, firstRow + 200); row++)
+                            {
+                                string v = (worksheet.Cell(row, col).GetValue<string>() ?? "").Trim();
+                                if (IsNameCandidate(v)) score++;
+                            }
+                            nameScores[col] = score;
+                        }
+
+                        int bestPairScore = 0;
+                        int bestAdCol = -1;
+                        int bestSoyadCol = -1;
+                        for (int col = tcCol + 1; col < lastCol; col++)
+                        {
+                            int leftScore;
+                            int rightScore;
+                            if (!nameScores.TryGetValue(col, out leftScore)) continue;
+                            if (!nameScores.TryGetValue(col + 1, out rightScore)) continue;
+                            if (leftScore == 0 || rightScore == 0) continue;
+                            int pairScore = leftScore + rightScore;
+                            if (pairScore > bestPairScore)
+                            {
+                                bestPairScore = pairScore;
+                                bestAdCol = col;
+                                bestSoyadCol = col + 1;
+                            }
+                        }
+
+                        if (bestPairScore > 0)
+                        {
+                            if (adCol == -1) adCol = bestAdCol;
+                            if (soyadCol == -1) soyadCol = bestSoyadCol;
+                        }
+                    }
+
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
                         
@@ -482,11 +577,16 @@ namespace denemelikimid
                                 string lastName = "";
                                 bool basariliBulundu = false;
 
-                                if (HasLetter(secilenAd) && HasLetter(secilenSoyad))
+                                if (HasLetter(secilenAd) && HasLetter(secilenSoyad) && !IsNameNoise(secilenAd) && !IsNameNoise(secilenSoyad))
                                 {
                                     firstName = secilenAd;
                                     lastName = secilenSoyad;
                                     basariliBulundu = true;
+                                }
+                                else if (HasLetter(secilenAd) && !IsNameNoise(secilenAd) && (IsNameNoise(secilenSoyad) || !HasLetter(secilenSoyad)))
+                                {
+                                    SplitFullName(secilenAd, out firstName, out lastName);
+                                    basariliBulundu = HasLetter(firstName);
                                 }
 
                                 // Öncelik 2: Başlık yanlış yakalansa bile TC'nin solundaki iki hücreyi dene
@@ -526,16 +626,7 @@ namespace denemelikimid
                                     }
                                     else
                                     {
-                                        var parcalar = secilenAdSoyadBirlikte.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                                        if (parcalar.Length == 1)
-                                        {
-                                            firstName = parcalar[0];
-                                        }
-                                        else if (parcalar.Length > 1)
-                                        {
-                                            lastName = parcalar[parcalar.Length - 1];
-                                            firstName = string.Join(" ", parcalar.Take(parcalar.Length - 1));
-                                        }
+                                        SplitFullName(secilenAdSoyadBirlikte, out firstName, out lastName);
                                     }
                                     basariliBulundu = true;
                                 }
@@ -575,6 +666,22 @@ namespace denemelikimid
                                             lastName = np[np.Length - 1];
                                             firstName = string.Join(" ", np.Take(np.Length - 1));
                                         }
+                                    }
+                                }
+
+                                if (IsMonthLike(NormalizeNameValue(lastName)))
+                                {
+                                    string tempFirst;
+                                    string tempLast;
+                                    SplitFullName(firstName, out tempFirst, out tempLast);
+                                    if (!string.IsNullOrWhiteSpace(tempLast) && !IsMonthLike(NormalizeNameValue(tempLast)))
+                                    {
+                                        firstName = tempFirst;
+                                        lastName = tempLast;
+                                    }
+                                    else
+                                    {
+                                        lastName = "";
                                     }
                                 }
 
@@ -656,23 +763,15 @@ namespace denemelikimid
                                 }
 
                                 // Puantaj tablosuna ekle/güncelle
-                                string queryPuantaj = @"INSERT INTO puantaj 
+                                string queryPuantaj = @"INSERT OR REPLACE INTO puantaj 
                                     (p_tc, p_ad_soyad, p_ad, p_soyad, p_iban, p_gun_detaylari, p_calistigi_gun_sayisi, p_ise_baslama_tarihi) 
-                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @detay, @gun, COALESCE(@iseGiris, CURDATE()))
-                                    ON DUPLICATE KEY UPDATE 
-                                    p_ad_soyad = @adsoy, 
-                                    p_ad = @ad, 
-                                    p_soyad = @soy, 
-                                    p_iban = @iban, 
-                                    p_gun_detaylari = @detay,
-                                    p_calistigi_gun_sayisi = @gun,
-                                    p_ise_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, p_ise_baslama_tarihi)";
+                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @detay, @gun, COALESCE(@iseGiris, DATE('now')))";
 
                                 using (var rowTx = conn.BeginTransaction())
                                 {
                                     try
                                     {
-                                        using (var cmd = new MySqlCommand(queryPuantaj, conn, rowTx))
+                                        using (var cmd = new SqliteCommand(queryPuantaj, conn, rowTx))
                                         {
                                             cmd.Parameters.AddWithValue("@tc", tc);
                                             cmd.Parameters.AddWithValue("@adsoy", adSoyad);
@@ -686,18 +785,11 @@ namespace denemelikimid
                                         }
 
                                         // Program katılımcıları tablosuna ekle/güncelle (kampüs bilgisiyle)
-                                        string queryKatilimci = @"INSERT INTO program_katilimcilari 
+                                        string queryKatilimci = @"INSERT OR REPLACE INTO program_katilimcilari 
                                             (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi) 
-                                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, COALESCE(@iseGiris, CURDATE()))
-                                            ON DUPLICATE KEY UPDATE 
-                                            pk_ad_soyad = @adsoy, 
-                                            pk_ad = @ad, 
-                                            pk_soyad = @soy, 
-                                            pk_iban_no = @iban, 
-                                            pk_gorev_yeri = @kampus,
-                                            pk_is_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, pk_is_baslama_tarihi)";
+                                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, COALESCE(@iseGiris, DATE('now')))";
 
-                                        using (var cmd = new MySqlCommand(queryKatilimci, conn, rowTx))
+                                        using (var cmd = new SqliteCommand(queryKatilimci, conn, rowTx))
                                         {
                                             cmd.Parameters.AddWithValue("@tc", tc);
                                             cmd.Parameters.AddWithValue("@adsoy", adSoyad);
@@ -731,19 +823,13 @@ namespace denemelikimid
                         // Bu dosyada görülen tüm geçerli TC'ler için kampüs eşleşmesini zorunlu olarak düzelt
                         foreach (var tcFix in gorulenTcListesi)
                         {
-                            string fixKatilimciSql = @"INSERT INTO program_katilimcilari
+                            string fixKatilimciSql = @"INSERT OR REPLACE INTO program_katilimcilari
                                 (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi)
                                 SELECT p.p_tc, p.p_ad_soyad, p.p_ad, p.p_soyad, p.p_iban, @kampus, p.p_ise_baslama_tarihi
                                 FROM puantaj p
-                                WHERE p.p_tc = @tc
-                                ON DUPLICATE KEY UPDATE
-                                pk_ad_soyad = VALUES(pk_ad_soyad),
-                                pk_ad = VALUES(pk_ad),
-                                pk_soyad = VALUES(pk_soyad),
-                                pk_iban_no = VALUES(pk_iban_no),
-                                pk_gorev_yeri = VALUES(pk_gorev_yeri)";
+                                WHERE p.p_tc = @tc";
 
-                            using (var fixCmd = new MySqlCommand(fixKatilimciSql, conn))
+                            using (var fixCmd = new SqliteCommand(fixKatilimciSql, conn))
                             {
                                 fixCmd.Parameters.AddWithValue("@tc", tcFix);
                                 fixCmd.Parameters.AddWithValue("@kampus", kampus);
@@ -877,12 +963,63 @@ namespace denemelikimid
                 return IsExcelHeaderLike(t)
                        || t.Contains("KAMPUS")
                        || t == "GUVENLIK" || t == "TEMIZLIK" || t == "IDARI" || t == "BILISIM" || t == "TEKNIK" || t == "AKADEMIK"
-                       || t == "OCAK" || t == "SUBAT" || t == "MART" || t == "NISAN" || t == "MAYIS" || t == "HAZIRAN"
-                       || t == "TEMMUZ" || t == "AGUSTOS" || t == "EYLUL" || t == "EKIM" || t == "KASIM" || t == "ARALIK"
+                       || IsMonthLike(t)
                        || t == "X" || t == "I" || t == "R";
             }
 
-            using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+            bool IsNameCandidate(string value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return false;
+                string v = value.Trim();
+                if (IsNameNoise(v)) return false;
+                if (v.All(char.IsDigit)) return false;
+                if (v.Replace(" ", "").ToUpperInvariant().StartsWith("TR") && v.Replace(" ", "").Length >= 26) return false;
+                if (IsLikelyTc(new string(v.Where(char.IsDigit).ToArray()))) return false;
+                return HasLetter(v);
+            }
+
+            if ((adCol == -1 || soyadCol == -1) && tcCol > -1)
+            {
+                var nameScores = new Dictionary<int, int>();
+                for (int col = tcCol + 1; col < dt.Columns.Count; col++)
+                {
+                    if (col == tcCol || col == ibanCol || col == gunCol || col == adSoyadCol) continue;
+                    int score = 0;
+                    for (int row = 0; row < Math.Min(dt.Rows.Count, 200); row++)
+                    {
+                        string v = (dt.Rows[row][col]?.ToString() ?? "").Trim();
+                        if (IsNameCandidate(v)) score++;
+                    }
+                    nameScores[col] = score;
+                }
+
+                int bestPairScore = 0;
+                int bestAdCol = -1;
+                int bestSoyadCol = -1;
+                for (int col = tcCol + 1; col < dt.Columns.Count - 1; col++)
+                {
+                    int leftScore;
+                    int rightScore;
+                    if (!nameScores.TryGetValue(col, out leftScore)) continue;
+                    if (!nameScores.TryGetValue(col + 1, out rightScore)) continue;
+                    if (leftScore == 0 || rightScore == 0) continue;
+                    int pairScore = leftScore + rightScore;
+                    if (pairScore > bestPairScore)
+                    {
+                        bestPairScore = pairScore;
+                        bestAdCol = col;
+                        bestSoyadCol = col + 1;
+                    }
+                }
+
+                if (bestPairScore > 0)
+                {
+                    if (adCol == -1) adCol = bestAdCol;
+                    if (soyadCol == -1) soyadCol = bestSoyadCol;
+                }
+            }
+
+            using (var conn = DbConnection.GetConnection())
             {
                 conn.Open();
                 var gorulenTcListesi = new HashSet<string>();
@@ -907,11 +1044,16 @@ namespace denemelikimid
                         string lastName = "";
                         bool basariliBulundu = false;
 
-                        if (HasLetter(secilenAd) && HasLetter(secilenSoyad))
+                        if (HasLetter(secilenAd) && HasLetter(secilenSoyad) && !IsNameNoise(secilenAd) && !IsNameNoise(secilenSoyad))
                         {
                             firstName = secilenAd;
                             lastName = secilenSoyad;
                             basariliBulundu = true;
+                        }
+                        else if (HasLetter(secilenAd) && !IsNameNoise(secilenAd) && (IsNameNoise(secilenSoyad) || !HasLetter(secilenSoyad)))
+                        {
+                            SplitFullName(secilenAd, out firstName, out lastName);
+                            basariliBulundu = HasLetter(firstName);
                         }
 
                         // Öncelik 2: Başlık yanlış yakalansa bile TC'nin solundaki iki hücreyi dene
@@ -950,16 +1092,7 @@ namespace denemelikimid
                             }
                             else
                             {
-                                var parcalar = secilenAdSoyadBirlikte.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                                if (parcalar.Length == 1)
-                                {
-                                    firstName = parcalar[0];
-                                }
-                                else if (parcalar.Length > 1)
-                                {
-                                    lastName = parcalar[parcalar.Length - 1];
-                                    firstName = string.Join(" ", parcalar.Take(parcalar.Length - 1));
-                                }
+                                SplitFullName(secilenAdSoyadBirlikte, out firstName, out lastName);
                             }
                             basariliBulundu = true;
                         }
@@ -991,6 +1124,22 @@ namespace denemelikimid
                                     lastName = np[np.Length - 1];
                                     firstName = string.Join(" ", np.Take(np.Length - 1));
                                 }
+                            }
+                        }
+
+                        if (IsMonthLike(NormalizeNameValue(lastName)))
+                        {
+                            string tempFirst;
+                            string tempLast;
+                            SplitFullName(firstName, out tempFirst, out tempLast);
+                            if (!string.IsNullOrWhiteSpace(tempLast) && !IsMonthLike(NormalizeNameValue(tempLast)))
+                            {
+                                firstName = tempFirst;
+                                lastName = tempLast;
+                            }
+                            else
+                            {
+                                lastName = "";
                             }
                         }
 
@@ -1037,18 +1186,15 @@ namespace denemelikimid
                             }
                         }
 
-                        string queryPuantaj = @"INSERT INTO puantaj 
+                        string queryPuantaj = @"INSERT OR REPLACE INTO puantaj 
                             (p_tc, p_ad_soyad, p_ad, p_soyad, p_iban, p_calistigi_gun_sayisi, p_ise_baslama_tarihi) 
-                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @gun, COALESCE(@iseGiris, CURDATE()))
-                            ON DUPLICATE KEY UPDATE 
-                            p_ad_soyad = @adsoy, p_ad = @ad, p_soyad = @soy, p_iban = @iban, p_calistigi_gun_sayisi = @gun,
-                            p_ise_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, p_ise_baslama_tarihi)";
+                            VALUES (@tc, @adsoy, @ad, @soy, @iban, @gun, COALESCE(@iseGiris, DATE('now')))";
 
                         using (var rowTx = conn.BeginTransaction())
                         {
                             try
                             {
-                                using (var cmd = new MySqlCommand(queryPuantaj, conn, rowTx))
+                                using (var cmd = new SqliteCommand(queryPuantaj, conn, rowTx))
                                 {
                                     cmd.Parameters.AddWithValue("@tc", tc);
                                     cmd.Parameters.AddWithValue("@adsoy", adSoyad);
@@ -1060,14 +1206,11 @@ namespace denemelikimid
                                     cmd.ExecuteNonQuery();
                                 }
 
-                                string queryKatilimci = @"INSERT INTO program_katilimcilari 
+                                string queryKatilimci = @"INSERT OR REPLACE INTO program_katilimcilari 
                                     (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi) 
-                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, COALESCE(@iseGiris, CURDATE()))
-                                    ON DUPLICATE KEY UPDATE 
-                                    pk_ad_soyad = @adsoy, pk_ad = @ad, pk_soyad = @soy, pk_iban_no = @iban, pk_gorev_yeri = @kampus,
-                                    pk_is_baslama_tarihi = IF(@iseGiris IS NOT NULL, @iseGiris, pk_is_baslama_tarihi)";
+                                    VALUES (@tc, @adsoy, @ad, @soy, @iban, @kampus, COALESCE(@iseGiris, DATE('now')))";
 
-                                using (var cmd = new MySqlCommand(queryKatilimci, conn, rowTx))
+                                using (var cmd = new SqliteCommand(queryKatilimci, conn, rowTx))
                                 {
                                     cmd.Parameters.AddWithValue("@tc", tc);
                                     cmd.Parameters.AddWithValue("@adsoy", adSoyad);
@@ -1099,19 +1242,13 @@ namespace denemelikimid
                 // Bu dosyada görülen tüm geçerli TC'ler için kampüs eşleşmesini zorunlu olarak düzelt
                 foreach (var tcFix in gorulenTcListesi)
                 {
-                    string fixKatilimciSql = @"INSERT INTO program_katilimcilari
+                    string fixKatilimciSql = @"INSERT OR REPLACE INTO program_katilimcilari
                         (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_iban_no, pk_gorev_yeri, pk_is_baslama_tarihi)
                         SELECT p.p_tc, p.p_ad_soyad, p.p_ad, p.p_soyad, p.p_iban, @kampus, p.p_ise_baslama_tarihi
                         FROM puantaj p
-                        WHERE p.p_tc = @tc
-                        ON DUPLICATE KEY UPDATE
-                        pk_ad_soyad = VALUES(pk_ad_soyad),
-                        pk_ad = VALUES(pk_ad),
-                        pk_soyad = VALUES(pk_soyad),
-                        pk_iban_no = VALUES(pk_iban_no),
-                        pk_gorev_yeri = VALUES(pk_gorev_yeri)";
+                        WHERE p.p_tc = @tc";
 
-                    using (var fixCmd = new MySqlCommand(fixKatilimciSql, conn))
+                    using (var fixCmd = new SqliteCommand(fixKatilimciSql, conn))
                     {
                         fixCmd.Parameters.AddWithValue("@tc", tcFix);
                         fixCmd.Parameters.AddWithValue("@kampus", kampus);

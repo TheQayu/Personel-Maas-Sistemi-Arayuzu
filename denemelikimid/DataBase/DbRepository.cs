@@ -1,4 +1,4 @@
-﻿using MySql.Data.MySqlClient;
+﻿using Microsoft.Data.Sqlite;
 using System;
 using System.Data;
 
@@ -7,23 +7,25 @@ namespace denemelikimid.DataBase
     public class DbRepository
     {
         // Parametreli select sorguları için DataTable döndüren method
-        public DataTable GetByQuery(string sql, params MySqlParameter[] parameters)
+        public DataTable GetByQuery(string sql, params SqliteParameter[] parameters)
         {
             try
             {
                 var dt = new DataTable();
 
-               
                 using (var con = DbConnection.GetConnection())
                 {
-                    using (var cmd = new MySqlCommand(sql, con))
+                    using (var cmd = new SqliteCommand(sql, con))
                     {
                         if (parameters != null)
                             cmd.Parameters.AddRange(parameters);
 
-                        using (var adapter = new MySqlDataAdapter(cmd))
+                        if (con.State != ConnectionState.Open)
+                            con.Open();
+
+                        using (var reader = cmd.ExecuteReader())
                         {
-                            adapter.Fill(dt);
+                            dt.Load(reader);
                         }
                     }
                 }
@@ -38,18 +40,19 @@ namespace denemelikimid.DataBase
         }
 
         // Parametreli sorgular için (Insert, Update, Delete)
-        public void Execute(string sql, params MySqlParameter[] parameters)
+        public void Execute(string sql, params SqliteParameter[] parameters)
         {
             try
             {
                 using (var con = DbConnection.GetConnection())
                 {
-                    using (var cmd = new MySqlCommand(sql, con))
+                    using (var cmd = new SqliteCommand(sql, con))
                     {
                         if (parameters != null)
                             cmd.Parameters.AddRange(parameters);
 
-                        con.Open();
+                        if (con.State != ConnectionState.Open)
+                            con.Open();
                         cmd.ExecuteNonQuery();
                     }
                 }

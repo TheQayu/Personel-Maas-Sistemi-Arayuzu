@@ -1,6 +1,7 @@
 using System;
 using System.Text.RegularExpressions;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
+using denemelikimid.DataBase;
 
 namespace denemelikimid.Validations
 {
@@ -96,10 +97,10 @@ namespace denemelikimid.Validations
 
             try
             {
-                using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                using (var conn = DbConnection.GetConnection())
                 {
                     conn.Open();
-                    var cmd = new MySqlCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE pk_tc = @tc", conn);
+                    var cmd = new SqliteCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE pk_tc = @tc", conn);
                     cmd.Parameters.AddWithValue("@tc", tc.Trim());
                     int count = Convert.ToInt32(cmd.ExecuteScalar());
                     return count > 0;
@@ -148,10 +149,10 @@ namespace denemelikimid.Validations
             try
             {
                 string cleanPhone = phone.Trim().Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "");
-                using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                using (var conn = DbConnection.GetConnection())
                 {
                     conn.Open();
-                    var cmd = new MySqlCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE REPLACE(REPLACE(pk_telefon, ' ', ''), '-', '') = @phone", conn);
+                    var cmd = new SqliteCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE REPLACE(REPLACE(pk_telefon, ' ', ''), '-', '') = @phone", conn);
                     cmd.Parameters.AddWithValue("@phone", cleanPhone);
                     int count = Convert.ToInt32(cmd.ExecuteScalar());
                     return count > 0;
@@ -203,10 +204,10 @@ namespace denemelikimid.Validations
                 if (!cleanIban.StartsWith("TR"))
                     cleanIban = "TR" + cleanIban;
 
-                using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                using (var conn = DbConnection.GetConnection())
                 {
                     conn.Open();
-                    var cmd = new MySqlCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE REPLACE(pk_iban_no, ' ', '') = @iban", conn);
+                    var cmd = new SqliteCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE REPLACE(pk_iban_no, ' ', '') = @iban", conn);
                     cmd.Parameters.AddWithValue("@iban", cleanIban);
                     int count = Convert.ToInt32(cmd.ExecuteScalar());
                     return count > 0;

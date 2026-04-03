@@ -1,7 +1,8 @@
 using System;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 using System.Windows.Forms;
 using System.Configuration;
+using System.IO;
 
 namespace denemelikimid.DataBase
 {
@@ -9,18 +10,21 @@ namespace denemelikimid.DataBase
     {
         private static readonly string _connectionString =
             ConfigurationManager.ConnectionStrings["IskurDb"]?.ConnectionString
-            ?? "Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;";
+            ?? new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "iskur.db")
+            }.ToString();
 
-        public static MySqlConnection GetConnection()
+        public static SqliteConnection GetConnection()
         {
-            MySqlConnection connection = new MySqlConnection(_connectionString);
+            SqliteConnection connection = new SqliteConnection(_connectionString);
 
             try
             {
                 connection.Open();
                 return connection;
             }
-            catch (MySqlException ex)
+            catch (SqliteException ex)
             {
                 MessageBox.Show("Veritabanı bağlantı hatası: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 throw;

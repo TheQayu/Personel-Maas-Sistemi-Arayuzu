@@ -1,5 +1,5 @@
 using System;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 using System.Data;
 
 namespace denemelikimid.DataBase
@@ -14,10 +14,13 @@ namespace denemelikimid.DataBase
 
                 using (var con = NotDbConnection.GetConnection())
                 {
-                    using (var adapter = new MySqlDataAdapter(
-                        $"SELECT * FROM {tableName}", con))
+                    if (con.State != ConnectionState.Open)
+                        con.Open();
+
+                    using (var cmd = new SqliteCommand($"SELECT * FROM {tableName}", con))
+                    using (var reader = cmd.ExecuteReader())
                     {
-                        adapter.Fill(datatable);
+                        datatable.Load(reader);
                     }
                 }
                 return datatable;
@@ -28,7 +31,7 @@ namespace denemelikimid.DataBase
             }
         }
 
-        public DataTable GetByQuery(string sql, params MySqlParameter[] parameters)
+        public DataTable GetByQuery(string sql, params SqliteParameter[] parameters)
         {
             try
             {
@@ -36,14 +39,17 @@ namespace denemelikimid.DataBase
 
                 using (var con = NotDbConnection.GetConnection())
                 {
-                    using (var cmd = new MySqlCommand(sql, con))
+                    using (var cmd = new SqliteCommand(sql, con))
                     {
                         if (parameters != null)
                             cmd.Parameters.AddRange(parameters);
 
-                        using (var adapter = new MySqlDataAdapter(cmd))
+                        if (con.State != ConnectionState.Open)
+                            con.Open();
+
+                        using (var reader = cmd.ExecuteReader())
                         {
-                            adapter.Fill(datatable);
+                            datatable.Load(reader);
                         }
                     }
                 }
@@ -56,17 +62,19 @@ namespace denemelikimid.DataBase
             }
         }
 
-        public void Execute(string sql, params MySqlParameter[] parameters)
+        public void Execute(string sql, params SqliteParameter[] parameters)
         {
             try
             {
                 using (var con = NotDbConnection.GetConnection())
                 {
-                    using (var cmd = new MySqlCommand(sql, con))
+                    using (var cmd = new SqliteCommand(sql, con))
                     {
                         if (parameters != null)
                             cmd.Parameters.AddRange(parameters);
 
+                        if (con.State != ConnectionState.Open)
+                            con.Open();
                         cmd.ExecuteNonQuery();
                     }
                 }

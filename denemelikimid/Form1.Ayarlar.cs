@@ -11,7 +11,7 @@ namespace denemelikimid
 
             Label lblInfo = new Label
             {
-                Text = "⚙️ Hakkında\n\nBu Uygulama Bursa Uludağ Üniversitesi İdari Ve Mali İşler Daire Başkanlığı Adına Yapılmıştır.\n\n V1.0 By Tanrıverdi",
+                Text = "⚙️ Hakkında\n\nBu Uygulama Bursa Uludağ Üniversitesi İdari Ve Mali İşler Daire Başkanlığı Adına Yapılmıştır.\n\n v.S.1.0 By Tanrıverdi",
                 Font = new Font("Segoe UI", 10, FontStyle.Italic),
                 ForeColor = colorTextSecondary,
                 AutoSize = true,

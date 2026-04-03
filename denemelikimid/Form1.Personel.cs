@@ -6,7 +6,8 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
+using denemelikimid.DataBase;
 using denemelikimid.Validations;
 
 namespace denemelikimid
@@ -142,18 +143,18 @@ namespace denemelikimid
                 {
                     try
                     {
-                        using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                         {
                             conn.Open();
 
                         // 1. ADIM: pk_departman SÜTUNU VAR MI? YOKSA EKLE.
                         try
                         {
-                            var cmdCheck = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'program_katilimcilari' AND COLUMN_NAME = 'pk_departman'", conn);
+                            var cmdCheck = new SqliteCommand("SELECT count(*) FROM pragma_table_info('program_katilimcilari') WHERE name = 'pk_departman'", conn);
                             int varMi = Convert.ToInt32(cmdCheck.ExecuteScalar());
                             if (varMi == 0)
                             {
-                                var cmdAdd = new MySqlCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_departman VARCHAR(100) DEFAULT NULL", conn);
+                                var cmdAdd = new SqliteCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_departman TEXT", conn);
                                 cmdAdd.ExecuteNonQuery();
                             }
                         }
@@ -162,48 +163,48 @@ namespace denemelikimid
                         // 1.b ADIM: isim/soyisim ayrı sütunları ekle (pk_ad, pk_soyad) ve puantaj için (p_ad, p_soyad)
                         try
                         {
-                            var cmdCheckAd = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'program_katilimcilari' AND COLUMN_NAME = 'pk_ad'", conn);
+                            var cmdCheckAd = new SqliteCommand("SELECT count(*) FROM pragma_table_info('program_katilimcilari') WHERE name = 'pk_ad'", conn);
                             int varAd = Convert.ToInt32(cmdCheckAd.ExecuteScalar());
                             if (varAd == 0)
                             {
-                                new MySqlCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_ad VARCHAR(200) DEFAULT NULL", conn).ExecuteNonQuery();
+                                new SqliteCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_ad TEXT", conn).ExecuteNonQuery();
                             }
 
-                            var cmdCheckSoy = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'program_katilimcilari' AND COLUMN_NAME = 'pk_soyad'", conn);
+                            var cmdCheckSoy = new SqliteCommand("SELECT count(*) FROM pragma_table_info('program_katilimcilari') WHERE name = 'pk_soyad'", conn);
                             int varSoy = Convert.ToInt32(cmdCheckSoy.ExecuteScalar());
                             if (varSoy == 0)
                             {
-                                new MySqlCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_soyad VARCHAR(200) DEFAULT NULL", conn).ExecuteNonQuery();
+                                new SqliteCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_soyad TEXT", conn).ExecuteNonQuery();
                             }
 
                             // TELEFON SÜTUNU KONTROLÜ VE EKLENMESI
-                            var cmdCheckTel = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'program_katilimcilari' AND COLUMN_NAME = 'pk_telefon'", conn);
+                            var cmdCheckTel = new SqliteCommand("SELECT count(*) FROM pragma_table_info('program_katilimcilari') WHERE name = 'pk_telefon'", conn);
                             int varTel = Convert.ToInt32(cmdCheckTel.ExecuteScalar());
                             if (varTel == 0)
                             {
-                                new MySqlCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_telefon VARCHAR(20) DEFAULT NULL", conn).ExecuteNonQuery();
+                                new SqliteCommand("ALTER TABLE program_katilimcilari ADD COLUMN pk_telefon TEXT", conn).ExecuteNonQuery();
                             }
 
                             // puantaj tabloları için de p_ad / p_soyad
-                            var cmdCheckPAd = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'puantaj' AND COLUMN_NAME = 'p_ad'", conn);
+                            var cmdCheckPAd = new SqliteCommand("SELECT count(*) FROM pragma_table_info('puantaj') WHERE name = 'p_ad'", conn);
                             int varPAd = Convert.ToInt32(cmdCheckPAd.ExecuteScalar());
                             if (varPAd == 0)
                             {
-                                new MySqlCommand("ALTER TABLE puantaj ADD COLUMN p_ad VARCHAR(200) DEFAULT NULL", conn).ExecuteNonQuery();
+                                new SqliteCommand("ALTER TABLE puantaj ADD COLUMN p_ad TEXT", conn).ExecuteNonQuery();
                             }
-                            var cmdCheckPSoy = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'puantaj' AND COLUMN_NAME = 'p_soyad'", conn);
+                            var cmdCheckPSoy = new SqliteCommand("SELECT count(*) FROM pragma_table_info('puantaj') WHERE name = 'p_soyad'", conn);
                             int varPSoy = Convert.ToInt32(cmdCheckPSoy.ExecuteScalar());
                             if (varPSoy == 0)
                             {
-                                new MySqlCommand("ALTER TABLE puantaj ADD COLUMN p_soyad VARCHAR(200) DEFAULT NULL", conn).ExecuteNonQuery();
+                                new SqliteCommand("ALTER TABLE puantaj ADD COLUMN p_soyad TEXT", conn).ExecuteNonQuery();
                             }
 
                             // PUANTAJ İÇİN TELEFON SÜTUNU
-                            var cmdCheckPTel = new MySqlCommand("SELECT count(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'iskur' AND TABLE_NAME = 'puantaj' AND COLUMN_NAME = 'p_telefon'", conn);
+                            var cmdCheckPTel = new SqliteCommand("SELECT count(*) FROM pragma_table_info('puantaj') WHERE name = 'p_telefon'", conn);
                             int varPTel = Convert.ToInt32(cmdCheckPTel.ExecuteScalar());
                             if (varPTel == 0)
                             {
-                                new MySqlCommand("ALTER TABLE puantaj ADD COLUMN p_telefon VARCHAR(20) DEFAULT NULL", conn).ExecuteNonQuery();
+                                new SqliteCommand("ALTER TABLE puantaj ADD COLUMN p_telefon TEXT", conn).ExecuteNonQuery();
                             }
 
                             // Dolu olan kayıtları bölerek yeni sütunlara yaz (basit ayrıştırma: ilk kelime = ad, geri kalanı = soyad)
@@ -213,7 +214,7 @@ namespace denemelikimid
                                                          SET pk_soyad = SUBSTRING_INDEX(pk_ad_soyad, ' ', -1), 
                                                              pk_ad = TRIM(SUBSTR(pk_ad_soyad, 1, LENGTH(pk_ad_soyad) - LENGTH(SUBSTRING_INDEX(pk_ad_soyad, ' ', -1)))) 
                                                          WHERE (pk_ad IS NULL OR pk_ad = '') AND pk_ad_soyad IS NOT NULL AND TRIM(pk_ad_soyad) != ''";
-                                new MySqlCommand(updateKatilim, conn).ExecuteNonQuery();
+                                new SqliteCommand(updateKatilim, conn).ExecuteNonQuery();
                             }
                             catch { }
 
@@ -223,7 +224,7 @@ namespace denemelikimid
                                                          SET p_soyad = SUBSTRING_INDEX(p_ad_soyad, ' ', -1), 
                                                              p_ad = TRIM(SUBSTR(p_ad_soyad, 1, LENGTH(p_ad_soyad) - LENGTH(SUBSTRING_INDEX(p_ad_soyad, ' ', -1)))) 
                                                          WHERE (p_ad IS NULL OR p_ad = '') AND p_ad_soyad IS NOT NULL AND TRIM(p_ad_soyad) != ''";
-                                new MySqlCommand(updatePuantaj, conn).ExecuteNonQuery();
+                                new SqliteCommand(updatePuantaj, conn).ExecuteNonQuery();
                             }
                             catch { }
                         }
@@ -231,17 +232,17 @@ namespace denemelikimid
 
                         // 2. ADIM: KAMPÜS VERİLERİNİ TEMİZLE (Eski bozuk veriler için)
                         string sqlKampusFix = @"UPDATE program_katilimcilari 
-                                     SET pk_gorev_yeri = CASE FLOOR(1 + RAND() * 3)
+                                     SET pk_gorev_yeri = CASE (ABS(RANDOM()) % 3) + 1
                                          WHEN 1 THEN 'Kampüs1' WHEN 2 THEN 'Kampüs2' ELSE 'Kampüs3' END
                                      WHERE pk_gorev_yeri NOT IN ('Kampüs1', 'Kampüs2', 'Kampüs3') OR pk_gorev_yeri IS NULL OR pk_gorev_yeri = ''";
-                        new MySqlCommand(sqlKampusFix, conn).ExecuteNonQuery();
+                        new SqliteCommand(sqlKampusFix, conn).ExecuteNonQuery();
 
                         // 3. ADIM: DEPARTMAN (GÖREV) KISMINI RASTGELE DOLDUR (Boş olanlar için)
                         string sqlDeptFix = @"UPDATE program_katilimcilari 
-                                     SET pk_departman = CASE FLOOR(1 + RAND() * 5)
+                                     SET pk_departman = CASE (ABS(RANDOM()) % 5) + 1
                                          WHEN 1 THEN 'İdari' WHEN 2 THEN 'Teknik' WHEN 3 THEN 'Güvenlik' WHEN 4 THEN 'Temizlik' ELSE 'Bilişim' END
                                      WHERE pk_departman IS NULL OR pk_departman = ''";
-                        new MySqlCommand(sqlDeptFix, conn).ExecuteNonQuery();
+                        new SqliteCommand(sqlDeptFix, conn).ExecuteNonQuery();
                         }
                     }
                     catch { }
@@ -253,7 +254,7 @@ namespace denemelikimid
             {
                 return Task.Run(() =>
                 {
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
                         // ARTIK GÖREV YERİNE pk_departman SÜTUNUNU ÇEKİYORUZ!
@@ -264,13 +265,13 @@ namespace denemelikimid
                              FROM program_katilimcilari 
                              WHERE (@filtre = 'Tümü' OR pk_gorev_yeri = @filtre)";
 
-                        var cmd = new MySqlCommand(sql, conn);
+                        var cmd = new SqliteCommand(sql, conn);
                         cmd.Parameters.AddWithValue("@filtre", kampusSecimi);
 
-                        using (var da = new MySqlDataAdapter(cmd))
+                        using (var reader = cmd.ExecuteReader())
                         {
                             DataTable dt = new DataTable();
-                            da.Fill(dt);
+                            dt.Load(reader);
                             return dt;
                         }
                     }
@@ -343,18 +344,18 @@ namespace denemelikimid
 
                 try
                 {
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
                         using (var tr = conn.BeginTransaction())
                         {
                             try
                             {
-                                var cmdPuantaj = new MySqlCommand("DELETE FROM puantaj WHERE p_tc = @tc", conn, tr);
+                                var cmdPuantaj = new SqliteCommand("DELETE FROM puantaj WHERE p_tc = @tc", conn, tr);
                                 cmdPuantaj.Parameters.AddWithValue("@tc", tc);
                                 cmdPuantaj.ExecuteNonQuery();
 
-                                var cmdPersonel = new MySqlCommand("DELETE FROM program_katilimcilari WHERE pk_tc = @tc", conn, tr);
+                                var cmdPersonel = new SqliteCommand("DELETE FROM program_katilimcilari WHERE pk_tc = @tc", conn, tr);
                                 cmdPersonel.Parameters.AddWithValue("@tc", tc);
                                 int deleted = cmdPersonel.ExecuteNonQuery();
 
@@ -472,7 +473,7 @@ namespace denemelikimid
 
                 try
                 {
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
                         string kampus = cmbKampusEkle.SelectedItem?.ToString() ?? "Kampüs1";
@@ -488,7 +489,7 @@ namespace denemelikimid
                         string sqlPer = @"INSERT INTO program_katilimcilari 
                                 (pk_tc, pk_ad_soyad, pk_ad, pk_soyad, pk_telefon, pk_iban_no, pk_gorev_yeri, pk_departman, pk_is_baslama_tarihi) 
                                 VALUES (@tc, @adsoy, @ad, @soy, @telefon, @iban, @kampus, @dept, @tarih)";
-                        var cmd = new MySqlCommand(sqlPer, conn);
+                        var cmd = new SqliteCommand(sqlPer, conn);
                         cmd.Parameters.AddWithValue("@tc", txtTc.Text.Trim());
                         cmd.Parameters.AddWithValue("@adsoy", fullName);
                         cmd.Parameters.AddWithValue("@ad", firstName);
@@ -500,9 +501,9 @@ namespace denemelikimid
                         cmd.Parameters.AddWithValue("@tarih", dtpBaslama.Value);
                         cmd.ExecuteNonQuery();
 
-                        string sqlPua = @"INSERT IGNORE INTO puantaj (p_tc, p_ad_soyad, p_ad, p_soyad, p_telefon, p_iban, p_ise_baslama_tarihi) 
+                        string sqlPua = @"INSERT OR IGNORE INTO puantaj (p_tc, p_ad_soyad, p_ad, p_soyad, p_telefon, p_iban, p_ise_baslama_tarihi) 
                                          VALUES (@tc, @adsoy, @ad, @soy, @telefon, @iban, @tarih)";
-                        var cmdPua = new MySqlCommand(sqlPua, conn);
+                        var cmdPua = new SqliteCommand(sqlPua, conn);
                         cmdPua.Parameters.AddWithValue("@tc", txtTc.Text.Trim());
                         cmdPua.Parameters.AddWithValue("@adsoy", fullName);
                         cmdPua.Parameters.AddWithValue("@ad", firstName);

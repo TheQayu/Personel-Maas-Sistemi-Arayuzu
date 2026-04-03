@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using SQLitePCL;
+
 
 namespace denemelikimid
 {
@@ -14,6 +16,7 @@ namespace denemelikimid
         [STAThread]
         static void Main()
         {
+            Batteries_V2.Init();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Form1());

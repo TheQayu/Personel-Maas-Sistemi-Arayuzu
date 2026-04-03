@@ -7,16 +7,17 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using System.IO;
 using System.Windows.Forms;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 
 namespace denemelikimid
 {
     public partial class Form1 : Form
     {
         private DateTime secilenTarih = DateTime.Now;
-        private const string LogoPath = @"C:\Users\mehme\source\repos\Personel-Maas-Sistemi-Arayuzu\denemelikimid\logo.png";
         private Icon appIcon;
-        private Image logoSource;
+
+        // Logomuzu direkt uygulamanın kalbinden (Resources) alıyoruz
+        private Image logoSource = Properties.Resources.logo;
 
         // Renkler
         private Color colorPrimary = Color.FromArgb(67, 97, 238);
@@ -62,17 +63,13 @@ namespace denemelikimid
             this.MinimumSize = new Size(1000, 600);
             this.BackColor = colorContent;
 
-            if (File.Exists(LogoPath))
+            // Formun sol üst köşesindeki ikonu logomuzdan otomatik üretiyoruz
+            if (logoSource != null)
             {
-                using (var bmp = new Bitmap(LogoPath))
+                using (var bmp = new Bitmap(logoSource))
                 {
                     appIcon = Icon.FromHandle(bmp.GetHicon());
                     this.Icon = appIcon;
-                }
-
-                if (logoSource == null)
-                {
-                    logoSource = LoadImageCopy(LogoPath);
                 }
             }
         }
@@ -117,7 +114,8 @@ namespace denemelikimid
             lblLogo.AutoSize = false;
             panelLogo.Controls.Add(lblLogo);
 
-            if (File.Exists(LogoPath))
+            // Logomuzu PictureBox içine yerleştiriyoruz
+            if (logoSource != null)
             {
                 var logoBox = new PictureBox
                 {
@@ -148,7 +146,7 @@ namespace denemelikimid
             AddMenuButton(panelMenu, "📊 Ana Sayfa", "Dashboard", true);
             AddMenuButton(panelMenu, "👥 Personel Listesi", "PersonelListesi");
             AddMenuButton(panelMenu, "📝 Puantaj Girişi", "Puantaj");
-            AddMenuButton(panelMenu, "📊 Raporlar & Bordro", "Raporlar");
+            AddMenuButton(panelMenu, "📊 Raporlar  Bordro", "Raporlar");
             AddMenuButton(panelMenu, "📄 Excel İşlemleri", "Excel");
             AddMenuButton(panelMenu, "⚙️ Hakkında", "Hakkında");
 
@@ -469,14 +467,6 @@ namespace denemelikimid
             logoBox.Location = new Point(Math.Max(0, x), Math.Max(0, y));
         }
 
-        private static Image LoadImageCopy(string path)
-        {
-            using (var img = Image.FromFile(path))
-            {
-                return new Bitmap(img);
-            }
-        }
-
         private static Image CreateCircularImage(Image source, int diameter)
         {
             if (source == null || diameter <= 0) return null;
@@ -513,11 +503,13 @@ namespace denemelikimid
 
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             this.SuspendLayout();
             // 
             // Form1
             // 
             this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "Form1";
             this.Load += new System.EventHandler(this.Form1_Load);
             this.ResumeLayout(false);
@@ -530,6 +522,3 @@ namespace denemelikimid
         }
     }
 }
-
-
-

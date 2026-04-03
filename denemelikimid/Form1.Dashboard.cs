@@ -4,7 +4,8 @@ using System.Data;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Threading.Tasks;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
+using denemelikimid.DataBase;
 
 namespace denemelikimid
 {
@@ -490,22 +491,22 @@ namespace denemelikimid
             int puantaj = 0;
             decimal odeme = 0;
 
-            using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+            using (var conn = DbConnection.GetConnection())
             {
                 conn.Open();
-                using (var cmd = new MySqlCommand("SELECT COUNT(*) FROM program_katilimcilari", conn))
+                using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM program_katilimcilari", conn))
                     toplam = Convert.ToInt32(cmd.ExecuteScalar());
-                using (var cmd = new MySqlCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE pk_isten_ayrilma_tarihi IS NULL", conn))
+                using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM program_katilimcilari WHERE pk_isten_ayrilma_tarihi IS NULL", conn))
                     aktif = Convert.ToInt32(cmd.ExecuteScalar());
 
                 string buAy = DateTime.Now.ToString("yyyy-MM");
-                using (var cmd = new MySqlCommand("SELECT COUNT(*) FROM puantaj WHERE p_yil_ay = @ay AND p_calistigi_gun_sayisi > 0", conn))
+                using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM puantaj WHERE p_yil_ay = @ay AND p_calistigi_gun_sayisi > 0", conn))
                 {
                     cmd.Parameters.AddWithValue("@ay", buAy);
                     puantaj = Convert.ToInt32(cmd.ExecuteScalar());
                 }
 
-                using (var cmd = new MySqlCommand("SELECT SUM(b_odenmesi_gereken_net_tutar) FROM bordro", conn))
+                using (var cmd = new SqliteCommand("SELECT SUM(b_odenmesi_gereken_net_tutar) FROM bordro", conn))
                 {
                     var res = cmd.ExecuteScalar();
                     if (res != DBNull.Value) odeme = Convert.ToDecimal(res);
@@ -517,17 +518,17 @@ namespace denemelikimid
 
         private void EnsureDashboardReminderTable()
         {
-            using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+            using (var conn = DbConnection.GetConnection())
             {
                 conn.Open();
                 string sql = @"CREATE TABLE IF NOT EXISTS dashboard_reminders (
-                                dr_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                                dr_date DATE NOT NULL,
-                                dr_time TIME NOT NULL,
-                                dr_text VARCHAR(255) NOT NULL,
-                                dr_created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                               ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-                new MySqlCommand(sql, conn).ExecuteNonQuery();
+                                dr_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                dr_date TEXT NOT NULL,
+                                dr_time TEXT NOT NULL,
+                                dr_text TEXT NOT NULL,
+                                dr_created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                               );";
+                new SqliteCommand(sql, conn).ExecuteNonQuery();
             }
         }
 
@@ -535,11 +536,11 @@ namespace denemelikimid
         {
             listBox.Items.Clear();
 
-            using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+            using (var conn = DbConnection.GetConnection())
             {
                 conn.Open();
 
-                var cmd = new MySqlCommand(@"SELECT dr_id, dr_time, dr_text 
+                var cmd = new SqliteCommand(@"SELECT dr_id, dr_time, dr_text 
                                              FROM dashboard_reminders 
                                              WHERE dr_date = @date 
                                              ORDER BY dr_time ASC", conn);
@@ -562,10 +563,10 @@ namespace denemelikimid
 
         private void AddDashboardReminder(DateTime date, TimeSpan time, string text)
         {
-            using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+            using (var conn = DbConnection.GetConnection())
             {
                 conn.Open();
-                var cmd = new MySqlCommand("INSERT INTO dashboard_reminders (dr_date, dr_time, dr_text) VALUES (@date, @time, @text)", conn);
+                var cmd = new SqliteCommand("INSERT INTO dashboard_reminders (dr_date, dr_time, dr_text) VALUES (@date, @time, @text)", conn);
                 cmd.Parameters.AddWithValue("@date", date.Date);
                 cmd.Parameters.AddWithValue("@time", time);
                 cmd.Parameters.AddWithValue("@text", text);
@@ -575,10 +576,10 @@ namespace denemelikimid
 
         private void DeleteDashboardReminder(int id)
         {
-            using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+            using (var conn = DbConnection.GetConnection())
             {
                 conn.Open();
-                var cmd = new MySqlCommand("DELETE FROM dashboard_reminders WHERE dr_id = @id", conn);
+                var cmd = new SqliteCommand("DELETE FROM dashboard_reminders WHERE dr_id = @id", conn);
                 cmd.Parameters.AddWithValue("@id", id);
                 cmd.ExecuteNonQuery();
             }

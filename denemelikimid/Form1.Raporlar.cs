@@ -7,7 +7,8 @@ using System.IO;
 using System.Windows.Forms;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
+using denemelikimid.DataBase;
 
 namespace denemelikimid
 {
@@ -148,7 +149,7 @@ namespace denemelikimid
 
             DataTable FetchBordroData(string secilenKampus, string donem)
             {
-                using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                using (var conn = DbConnection.GetConnection())
                 {
                     conn.Open();
 
@@ -160,14 +161,14 @@ namespace denemelikimid
                          WHERE (@filtre = 'Tümü' OR b_gorev_yeri = @filtre)
                            AND b_yil_ay = @donem";
 
-                    var cmd = new MySqlCommand(sql, conn);
+                    var cmd = new SqliteCommand(sql, conn);
                     cmd.Parameters.AddWithValue("@filtre", secilenKampus);
                     cmd.Parameters.AddWithValue("@donem", donem);
 
-                    using (var da = new MySqlDataAdapter(cmd))
+                    using (var reader = cmd.ExecuteReader())
                     {
                         DataTable dt = new DataTable();
-                        da.Fill(dt);
+                        dt.Load(reader);
                         return dt;
                     }
                 }
@@ -185,35 +186,43 @@ namespace denemelikimid
                 try
                 {
                     decimal gunlukBruk = numUcret.Value;
-                    using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                    using (var conn = DbConnection.GetConnection())
                     {
                         conn.Open();
 
                         // Çoklu ay desteği için tüm ilgili tablolardaki UNIQUE kısıtlarını kaldır
                         try
                         {
-                            var dtIdx = new DataTable();
-                            using (var da = new MySqlDataAdapter(
-                                "SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS " +
-                                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('puantaj','bordro','muhtasar_raporu','banka_listesi') " +
-                                "AND NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY' GROUP BY TABLE_NAME, INDEX_NAME", conn))
-                                da.Fill(dtIdx);
-                            foreach (DataRow idxRow in dtIdx.Rows)
+                            var tables = new[] { "puantaj", "bordro", "muhtasar_raporu", "banka_listesi" };
+                            foreach (var table in tables)
                             {
-                                try { new MySqlCommand($"ALTER TABLE `{idxRow["TABLE_NAME"]}` DROP INDEX `{idxRow["INDEX_NAME"]}`", conn).ExecuteNonQuery(); } catch { }
+                                using (var idxCmd = new SqliteCommand($"PRAGMA index_list('{table}')", conn))
+                                using (var reader = idxCmd.ExecuteReader())
+                                {
+                                    while (reader.Read())
+                                    {
+                                        var isUnique = Convert.ToInt32(reader["unique"]) == 1;
+                                        var indexName = reader["name"].ToString();
+                                        if (isUnique && !string.IsNullOrWhiteSpace(indexName))
+                                        {
+                                            var safeName = indexName.Replace("\"", "\"\"");
+                                            try { new SqliteCommand($"DROP INDEX IF EXISTS \"{safeName}\"", conn).ExecuteNonQuery(); } catch { }
+                                        }
+                                    }
+                                }
                             }
                         } catch { }
 
                         // b_yil_ay sütununu ekle (zaten varsa hata yutulur)
-                        try { new MySqlCommand("ALTER TABLE bordro ADD COLUMN b_yil_ay VARCHAR(7)", conn).ExecuteNonQuery(); } catch { }
-                        try { new MySqlCommand("ALTER TABLE muhtasar_raporu ADD COLUMN mh_yil_ay VARCHAR(7)", conn).ExecuteNonQuery(); } catch { }
-                        try { new MySqlCommand("ALTER TABLE banka_listesi ADD COLUMN bl_yil_ay VARCHAR(7)", conn).ExecuteNonQuery(); } catch { }
+                        try { new SqliteCommand("ALTER TABLE bordro ADD COLUMN b_yil_ay TEXT", conn).ExecuteNonQuery(); } catch { }
+                        try { new SqliteCommand("ALTER TABLE muhtasar_raporu ADD COLUMN mh_yil_ay TEXT", conn).ExecuteNonQuery(); } catch { }
+                        try { new SqliteCommand("ALTER TABLE banka_listesi ADD COLUMN bl_yil_ay TEXT", conn).ExecuteNonQuery(); } catch { }
 
                         // Seçili ayın verilerini temizle (diğer aylar korunur)
                         string secilenDonem = dtpRaporDonem.Value.ToString("yyyy-MM");
-                        using (var delCmd = new MySqlCommand("DELETE FROM bordro WHERE b_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
-                        using (var delCmd = new MySqlCommand("DELETE FROM muhtasar_raporu WHERE mh_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
-                        using (var delCmd = new MySqlCommand("DELETE FROM banka_listesi WHERE bl_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
+                        using (var delCmd = new SqliteCommand("DELETE FROM bordro WHERE b_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
+                        using (var delCmd = new SqliteCommand("DELETE FROM muhtasar_raporu WHERE mh_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
+                        using (var delCmd = new SqliteCommand("DELETE FROM banka_listesi WHERE bl_yil_ay = @d", conn)) { delCmd.Parameters.AddWithValue("@d", secilenDonem); delCmd.ExecuteNonQuery(); }
 
                         // Puantajdan verileri al (Personel tablosuyla birleştirip Kampüsü de alıyoruz)
                         string sqlPuantaj = @"SELECT p.*, COALESCE(pk.pk_gorev_yeri, 'Kampüs1') AS guncel_kampus 
@@ -222,7 +231,7 @@ namespace denemelikimid
                                       WHERE p.p_calistigi_gun_sayisi > 0
                                         AND p.p_yil_ay = @donem";
 
-                        var cmdGet = new MySqlCommand(sqlPuantaj, conn);
+                        var cmdGet = new SqliteCommand(sqlPuantaj, conn);
                         cmdGet.Parameters.AddWithValue("@donem", secilenDonem);
                         var dr = cmdGet.ExecuteReader();
                         DataTable dtPuantaj = new DataTable();
@@ -249,7 +258,7 @@ namespace denemelikimid
                         (b_tc, b_ad_soyad, b_gorev_yeri, b_aylik_calisilan_gun, b_tahakkuk_toplami, b_sosyal_guvenlik_primi, b_gelir_vergisi_kesintisi, b_damga_vergisi_kesintisi, b_odenmesi_gereken_net_tutar, b_yil_ay) 
                         VALUES (@tc, @ad, @kampus, @gun, @brut, @sgk, @gv, @dv, @net, @donem)";
 
-                            using (var cmd = new MySqlCommand(sqlBordro, conn))
+                            using (var cmd = new SqliteCommand(sqlBordro, conn))
                             {
                                 cmd.Parameters.AddWithValue("@tc", tc);
                                 cmd.Parameters.AddWithValue("@ad", ad);
@@ -266,13 +275,13 @@ namespace denemelikimid
 
                             // Muhtasar ve Banka tablolarına ekleme kısımları aynen devam...
                             string sqlMuhtasar = "INSERT INTO muhtasar_raporu (mh_tc, mh_ad_soyad, mh_prim_odeme_gunu, mh_hak_edilen_ucret, mh_doneme_ait_gelir_vergisi_matrahi, mh_gelir_vergisi_kesintisi, mh_damga_vergisi_kesintisi, mh_yil_ay) VALUES (@tc, @ad, @gun, @brut, @matrah, @gv, @dv, @donem)";
-                            using (var cmd = new MySqlCommand(sqlMuhtasar, conn))
+                            using (var cmd = new SqliteCommand(sqlMuhtasar, conn))
                             {
                                 cmd.Parameters.AddWithValue("@tc", tc); cmd.Parameters.AddWithValue("@ad", ad); cmd.Parameters.AddWithValue("@gun", gun); cmd.Parameters.AddWithValue("@brut", brutUcret); cmd.Parameters.AddWithValue("@matrah", gelirVergisiMatrahi); cmd.Parameters.AddWithValue("@gv", gelirVergisi); cmd.Parameters.AddWithValue("@dv", damgaVergisi); cmd.Parameters.AddWithValue("@donem", secilenDonem); cmd.ExecuteNonQuery();
                             }
 
                             string sqlBanka = "INSERT INTO banka_listesi (bl_tc, bl_ad_soyad, bl_iban_no, bl_tutar, bl_yil_ay) VALUES (@tc, @ad, @iban, @net, @donem)";
-                            using (var cmd = new MySqlCommand(sqlBanka, conn))
+                            using (var cmd = new SqliteCommand(sqlBanka, conn))
                             {
                                 cmd.Parameters.AddWithValue("@tc", tc); cmd.Parameters.AddWithValue("@ad", ad); cmd.Parameters.AddWithValue("@iban", iban); cmd.Parameters.AddWithValue("@net", netUcret); cmd.Parameters.AddWithValue("@donem", secilenDonem); cmd.ExecuteNonQuery();
                             }
@@ -314,12 +323,13 @@ namespace denemelikimid
             try
             {
                 DataTable dt = new DataTable();
-                using (var conn = new MySqlConnection("Server=localhost;Database=iskur;Uid=yeniAdmin;Pwd=1234;"))
+                using (var conn = DbConnection.GetConnection())
                 {
                     conn.Open();
-                    using (var da = new MySqlDataAdapter($"SELECT * FROM {tableName}", conn))
+                    using (var cmd = new SqliteCommand($"SELECT * FROM {tableName}", conn))
+                    using (var reader = cmd.ExecuteReader())
                     {
-                        da.Fill(dt);
+                        dt.Load(reader);
                     }
                 }
 

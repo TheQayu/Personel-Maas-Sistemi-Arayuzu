@@ -1,15 +1,20 @@
-﻿using MySql.Data.MySqlClient;
+﻿using Microsoft.Data.Sqlite;
+using System;
+using System.IO;
 
 namespace denemelikimid.DataBase
 {
     public static class DbConnection
     {
         private static readonly string _connectionString =
-            "Server=localhost;Database=iskur;Uid=root;Pwd=ms123456.";
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "iskur.db")
+            }.ToString();
 
-        public static MySqlConnection GetConnection()
+        public static SqliteConnection GetConnection()
         {
-            return new MySqlConnection(_connectionString);
+            return new SqliteConnection(_connectionString);
         }
     }
 }

@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Text;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 using denemelikimid.DataBase.Models;
 namespace denemelikimid.DataBase.Repos
 {
@@ -21,11 +21,11 @@ namespace denemelikimid.DataBase.Repos
             string query = @"INSERT INTO banka_listesi (bl_iban_no, bl_tutar, bl_ad_soyad, bl_tc, bl_aciklama)
                             VALUES (@iban, @tutar, @ad_soyad, @tc, @aciklama)0";
             _db.Execute(query,
-             new MySqlParameter("@iban", model.Bnk_iban),
-             new MySqlParameter("@tutar", model.Bnk_tutar),
-             new MySqlParameter("@ad_soyad", model.Bnk_ad_soyad),
-             new MySqlParameter("@tc", model.Bnk_tc),
-             new MySqlParameter("@aciklama", model.Bnk_aciklama)
+             new SqliteParameter("@iban", model.Bnk_iban),
+             new SqliteParameter("@tutar", model.Bnk_tutar),
+             new SqliteParameter("@ad_soyad", model.Bnk_ad_soyad),
+             new SqliteParameter("@tc", model.Bnk_tc),
+             new SqliteParameter("@aciklama", model.Bnk_aciklama)
 
 
            );
@@ -34,7 +34,7 @@ namespace denemelikimid.DataBase.Repos
         {
             _db.Execute(
                 @"DELETE FROM banka_listesi WHERE bl_id = @id",
-                new MySqlParameter("@id", model.Bnk_id));
+                new SqliteParameter("@id", model.Bnk_id));
         }
 
         public void Guncelle(BankaModel model)
@@ -47,12 +47,12 @@ namespace denemelikimid.DataBase.Repos
                 bl_aciklama = @aciklama
                 WHERE bl_id = @id";
             _db.Execute(query,
-             new MySqlParameter("@iban", model.Bnk_iban),
-             new MySqlParameter("@tutar", model.Bnk_tutar),
-             new MySqlParameter("@ad_soyad", model.Bnk_ad_soyad),
-             new MySqlParameter("@tc", model.Bnk_tc),
-             new MySqlParameter("@aciklama", model.Bnk_aciklama),
-             new MySqlParameter("@id", model.Bnk_id)
+             new SqliteParameter("@iban", model.Bnk_iban),
+             new SqliteParameter("@tutar", model.Bnk_tutar),
+             new SqliteParameter("@ad_soyad", model.Bnk_ad_soyad),
+             new SqliteParameter("@tc", model.Bnk_tc),
+             new SqliteParameter("@aciklama", model.Bnk_aciklama),
+             new SqliteParameter("@id", model.Bnk_id)
            );
         }
     }

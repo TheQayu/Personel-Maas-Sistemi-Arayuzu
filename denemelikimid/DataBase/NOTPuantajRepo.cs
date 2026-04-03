@@ -1,6 +1,6 @@
 using System;
 using System.Data;
-using MySql.Data.MySqlClient;
+using Microsoft.Data.Sqlite;
 
 namespace denemelikimid.DataBase
 {
@@ -18,17 +18,16 @@ namespace denemelikimid.DataBase
         {
             return _db.GetByQuery(
                 @"SELECT * FROM puantaj WHERE p_tc_no = @tc",
-                new MySqlParameter("@tc", tc_no));
+                new SqliteParameter("@tc", tc_no));
         }
 
         public void Ekle(double tc_no, int gun, string durum)
         {
             _db.Execute(
-                @"INSERT INTO puantaj (p_tc_no, p_gun, p_durum) VALUES (@tc, @gun, @durum) " +
-                "ON DUPLICATE KEY UPDATE p_durum = @durum",
-                new MySqlParameter("@tc", tc_no),
-                new MySqlParameter("@gun", gun),
-                new MySqlParameter("@durum", durum));
+                @"INSERT OR REPLACE INTO puantaj (p_tc_no, p_gun, p_durum) VALUES (@tc, @gun, @durum)",
+                new SqliteParameter("@tc", tc_no),
+                new SqliteParameter("@gun", gun),
+                new SqliteParameter("@durum", durum));
         }
     }
 }
